@@ -1,5 +1,6 @@
 import { validateWord, type ValidationResult } from "@game/validation";
 import type { Category } from "@game/game-engine";
+import { validateArabicGivenName } from "./name-service";
 
 interface SupabaseRow {
   word: string;
@@ -29,7 +30,7 @@ const cache = new Map<string, { expiresAt: number; result: ValidationResult & { 
 const inFlight = new Map<string, Promise<ValidationResult & { sources?: string[] }>>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const EXTERNAL_TIMEOUT_MS = 3500;
-const WIKIMEDIA_USER_AGENT = "GAME-validation/0.7 (NOIR WOLVEX)";
+const WIKIMEDIA_USER_AGENT = "GAME-validation/0.8 (NOIR WOLVEX)";
 
 function cacheKey(value: string, category: Category, letter: string): string {
   return `${category}:${letter}:${value.trim()}`;
@@ -189,8 +190,7 @@ async function queryWikidata(word: string): Promise<ExternalEvidence | null> {
       .filter(Boolean);
     const exactLabel = normalizeLookup(label) === normalizedWord;
     const exactAlias = aliases.some((alias) => normalizeLookup(alias) === normalizedWord);
-    const exact = exactLabel || exactAlias;
-    if (!exact) continue;
+    if (!exactLabel && !exactAlias) continue;
 
     const p31Ids = getEntityIds(entity.claims, "P31");
     const p279Ids = getEntityIds(entity.claims, "P279");
@@ -219,6 +219,7 @@ async function queryWikidata(word: string): Promise<ExternalEvidence | null> {
       source: directCategory ? "wikidata-entity" : "wikidata-description",
       exact: true,
     };
+
     if (!best || evidence.confidence > best.confidence) best = evidence;
   }
 
@@ -295,16 +296,32 @@ async function resolveExternal(value: string, requestedCategory: Category): Prom
 
 async function validateExternally(local: ValidationResult): Promise<ValidationResult & { sources?: string[] }> {
   if (!local.normalized) return local;
-  const external = await resolveExternal(local.normalized, local.category);
-  if (!external) return local;
 
-  return {
-    ...local,
-    decision: "accept",
-    reason: external.reason,
-    confidence: external.confidence,
-    sources: external.sources,
-  };
+  const external = await resolveExternal(local.normalized, local.category);
+  if (external) {
+    return {
+      ...local,
+      decision: "accept",
+      reason: external.reason,
+      confidence: external.confidence,
+      sources: external.sources,
+    };
+  }
+
+  if (local.category === "human") {
+    const nameEvidence = await validateArabicGivenName(local.normalized);
+    if (nameEvidence) {
+      return {
+        ...local,
+        decision: "accept",
+        reason: "known_word",
+        confidence: nameEvidence.confidence,
+        sources: [nameEvidence.source],
+      };
+    }
+  }
+
+  return local;
 }
 
 export async function validateWithHybridSources(
@@ -314,6 +331,7 @@ export async function validateWithHybridSources(
 ): Promise<ValidationResult & { sources?: string[] }> {
   const local = validateWord(value, category, letter);
   const key = cacheKey(local.normalized, category, letter);
+
   const cached = getCached(key);
   if (cached) return cached;
 
