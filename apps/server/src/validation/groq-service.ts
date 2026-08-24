@@ -1,5 +1,8 @@
-export interface GroqNameResult {
+import type { Category } from "@game/game-engine";
+
+export interface GroqValidationResult {
   valid: boolean;
+  category: Category;
   confidence: number;
   reason: string;
   source: "groq-ai";
@@ -11,9 +14,11 @@ const GROQ_TIMEOUT_MS = 4000;
 const LOCAL_DAILY_CAP = 900;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-const cache = new Map<string, { expiresAt: number; result: GroqNameResult }>();
+const cache = new Map<string, { expiresAt: number; result: GroqValidationResult }>();
 let usageDay = "";
 let usageCount = 0;
+
+const CATEGORIES: readonly Category[] = ["human", "animal", "plant", "object", "country"];
 
 function normalize(value: string): string {
   return value
@@ -32,47 +37,45 @@ function todayKey(): string {
 }
 
 function canUseGroq(): boolean {
-  const key = process.env.GROQ_API_KEY;
-  if (!key) return false;
-
+  if (!process.env.GROQ_API_KEY) return false;
   const today = todayKey();
   if (usageDay !== today) {
     usageDay = today;
     usageCount = 0;
   }
-
   return usageCount < LOCAL_DAILY_CAP;
 }
 
-function getCached(word: string): GroqNameResult | null {
-  const key = normalize(word);
-  const hit = cache.get(key);
+function cacheKey(word: string, requestedCategory: Category): string {
+  return `${requestedCategory}:${normalize(word)}`;
+}
+
+function getCached(word: string, requestedCategory: Category): GroqValidationResult | null {
+  const hit = cache.get(cacheKey(word, requestedCategory));
   if (!hit) return null;
   if (hit.expiresAt < Date.now()) {
-    cache.delete(key);
+    cache.delete(cacheKey(word, requestedCategory));
     return null;
   }
   return hit.result;
 }
 
-function setCached(word: string, result: GroqNameResult): void {
-  cache.set(normalize(word), {
+function setCached(word: string, requestedCategory: Category, result: GroqValidationResult): void {
+  cache.set(cacheKey(word, requestedCategory), {
     expiresAt: Date.now() + CACHE_TTL_MS,
     result,
   });
 }
 
-export async function validateArabicHumanNameWithGroq(word: string): Promise<GroqNameResult | null> {
+export async function validateWordWithGroq(word: string, requestedCategory: Category): Promise<GroqValidationResult | null> {
   const normalized = normalize(word);
   if (!normalized) return null;
 
-  const cached = getCached(normalized);
+  const cached = getCached(normalized, requestedCategory);
   if (cached) return cached;
-
   if (!canUseGroq()) return null;
 
   usageCount += 1;
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS);
 
@@ -87,31 +90,32 @@ export async function validateArabicHumanNameWithGroq(word: string): Promise<Gro
       body: JSON.stringify({
         model: GROQ_MODEL,
         temperature: 0,
-        max_tokens: 120,
+        max_tokens: 160,
         messages: [
           {
             role: "system",
             content:
-              "You are a strict but practical validator for an Arabic word game. Determine whether the supplied Arabic word is a reasonably established human given name or personal name in Arabic usage. Common names must be accepted even if there is no Wikipedia/Wiktionary page for a specific person. Examples that should normally be valid include: حيدر، مرام، ضحى، قاسم، زهراء، محمد، فاطمة، علي. Reject ordinary non-name vocabulary such as colors, objects, animals, plants, places, countries, verbs, adjectives, and arbitrary strings. Do not invent evidence. Return strict JSON only with valid, confidence, and reason.",
+              "You are the final validator for an Arabic word game. Classify the supplied Arabic word into exactly one category: human, animal, plant, object, or country. Accept established Arabic words and names even when they do not have a Wikipedia page. Do not invent facts for arbitrary strings. Human includes recognized personal/given names. Animal includes recognized animal/common species names. Plant includes recognized plant/tree/fruit/vegetable names. Object includes tangible objects, tools, devices, buildings, materials, foods, and similar things. Country includes sovereign states and commonly recognized country names. Return strict JSON only.",
           },
           {
             role: "user",
-            content: `Arabic word: ${word}\nIs this reasonably usable as a human name in a word game? If it is a common or recognized personal name, set valid=true and confidence at least 0.80.`,
+            content: `Arabic word: ${word}\nRequested category: ${requestedCategory}\nClassify the word and decide whether it reasonably belongs to the requested category.`,
           },
         ],
         response_format: {
           type: "json_schema",
           json_schema: {
-            name: "arabic_name_validation",
+            name: "arabic_word_validation",
             strict: true,
             schema: {
               type: "object",
               properties: {
                 valid: { type: "boolean" },
+                category: { type: "string", enum: CATEGORIES },
                 confidence: { type: "number" },
                 reason: { type: "string" },
               },
-              required: ["valid", "confidence", "reason"],
+              required: ["valid", "category", "confidence", "reason"],
               additionalProperties: false,
             },
           },
@@ -124,29 +128,31 @@ export async function validateArabicHumanNameWithGroq(word: string): Promise<Gro
     const payload = (await response.json()) as {
       choices?: Array<{ message?: { content?: string | null } }>;
     };
-
     const content = payload.choices?.[0]?.message?.content;
     if (!content) return null;
 
     const parsed = JSON.parse(content) as {
       valid?: boolean;
+      category?: Category;
       confidence?: number;
       reason?: string;
     };
 
-    if (typeof parsed.valid !== "boolean" || typeof parsed.confidence !== "number") {
-      return null;
-    }
+    if (
+      typeof parsed.valid !== "boolean" ||
+      !parsed.category ||
+      !CATEGORIES.includes(parsed.category) ||
+      typeof parsed.confidence !== "number"
+    ) return null;
 
-    const confidence = Math.max(0, Math.min(1, parsed.confidence));
-    const result: GroqNameResult = {
+    const result: GroqValidationResult = {
       valid: parsed.valid,
-      confidence,
+      category: parsed.category,
+      confidence: Math.max(0, Math.min(1, parsed.confidence)),
       reason: parsed.reason?.trim() || "ai_validation",
       source: "groq-ai",
     };
-
-    setCached(normalized, result);
+    setCached(normalized, requestedCategory, result);
     return result;
   } catch {
     return null;
