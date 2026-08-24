@@ -10,6 +10,7 @@
     "@game/game-engine": "file:../../packages/game-engine",
     "@game/validation": "file:../../packages/validation",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "socket.io": "^4.8.1"
   },
