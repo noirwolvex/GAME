@@ -12,6 +12,7 @@
     "server": "npm --workspace @game/server run dev",
     "validation:awn": "python scripts/download-awn.py",
     "validation:awn:classify": "python scripts/classify-awn.py",
+    "validation:awn:expand": "python scripts/classify-awn-expanded.py",
     "validation:build-index": "python scripts/build-validation-index.py",
     "validation:wikidata": "python scripts/import-wikidata.py",
     "validation:omw": "python scripts/import-omw.py",
