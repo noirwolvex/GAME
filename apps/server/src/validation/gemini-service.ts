@@ -9,7 +9,7 @@ export interface GeminiValidationResult {
 }
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.7-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite";
 const GEMINI_TIMEOUT_MS = 5000;
 const LOCAL_DAILY_CAP = 300;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
