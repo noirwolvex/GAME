@@ -16,6 +16,7 @@
     "validation:wikidata": "python scripts/import-wikidata.py",
     "validation:omw": "python scripts/import-omw.py",
     "validation:omw:classify": "python scripts/classify-omw.py",
-    "validation:merge": "python scripts/merge-validation-sources.py"
+    "validation:merge": "python scripts/merge-validation-sources.py",
+    "validation:wordlist": "python scripts/import-arabic-wordlist.py"
   }
 }
