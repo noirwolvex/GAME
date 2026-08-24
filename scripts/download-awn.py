@@ -23,6 +23,10 @@ def normalize(value: str) -> str:
     return re.sub(r"\s+", " ", value)
 
 
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
 def download() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if RAW_FILE.exists():
@@ -30,49 +34,98 @@ def download() -> None:
     print(f"Downloading Arabic WordNet 4.1.0 from {URL}")
     request = urllib.request.Request(
         URL,
-        headers={"User-Agent": "GAME-validation/0.1"},
+        headers={"User-Agent": "GAME-validation/0.2"},
     )
-    with urllib.request.urlopen(request, timeout=60) as response, RAW_FILE.open("wb") as out:
-        out.write(response.read())
+    with urllib.request.urlopen(request, timeout=120) as response, RAW_FILE.open("wb") as out:
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
 
 
 def build_index() -> None:
     print("Building compact Arabic WordNet lookup index...")
-    entries: dict[str, dict[str, object]] = {}
+
+    # WN-LMF stores words under <LexicalEntry>/<Lemma> and connects them to
+    # synsets through <Sense synset="...">. Definitions and POS live on
+    # <Synset>. The previous parser incorrectly expected <lemma> children
+    # inside <Synset>, which produced an empty index.
+    synsets: dict[str, dict[str, object]] = {}
     synset_count = 0
 
     with gzip.open(RAW_FILE, "rb") as handle:
         for event, elem in ET.iterparse(handle, events=("end",)):
-            if elem.tag.endswith("synset"):
-                synset_count += 1
-                pos = elem.attrib.get("partOfSpeech", "")
-                synset_id = elem.attrib.get("id", "")
-                lemmas: list[str] = []
-                for child in elem.iter():
-                    if child.tag.endswith("lemma"):
-                        lemma = child.attrib.get("writtenForm", "") or (child.text or "")
-                        lemma = normalize(lemma)
-                        if lemma and lemma not in lemmas:
-                            lemmas.append(lemma)
-                definition = ""
-                for child in elem.iter():
-                    if child.tag.endswith("definition") and child.text:
-                        definition = normalize(child.text)
-                        break
+            if local_name(elem.tag) != "Synset":
+                continue
 
-                for lemma in lemmas:
-                    bucket = entries.setdefault(
-                        lemma,
-                        {"synsets": [], "pos": [], "definitions": []},
-                    )
-                    if synset_id and synset_id not in bucket["synsets"]:
+            synset_id = elem.attrib.get("id", "")
+            if synset_id:
+                definition = ""
+                for child in elem:
+                    if local_name(child.tag) == "Definition":
+                        text = "".join(child.itertext()).strip()
+                        if text:
+                            definition = normalize(text)
+                            break
+
+                synsets[synset_id] = {
+                    "pos": elem.attrib.get("partOfSpeech", ""),
+                    "definition": definition,
+                }
+                synset_count += 1
+
+            elem.clear()
+
+    entries: dict[str, dict[str, object]] = {}
+
+    with gzip.open(RAW_FILE, "rb") as handle:
+        for event, elem in ET.iterparse(handle, events=("end",)):
+            if local_name(elem.tag) != "LexicalEntry":
+                continue
+
+            lemma_value = ""
+            pos = ""
+            senses: list[str] = []
+
+            for child in elem:
+                child_name = local_name(child.tag)
+                if child_name == "Lemma":
+                    lemma_value = child.attrib.get("writtenForm", "") or "".join(child.itertext())
+                    pos = child.attrib.get("partOfSpeech", "")
+                elif child_name == "Sense":
+                    synset_id = child.attrib.get("synset", "")
+                    if synset_id:
+                        senses.append(synset_id)
+
+            lemma = normalize(lemma_value)
+            if lemma and senses:
+                bucket = entries.setdefault(
+                    lemma,
+                    {"synsets": [], "pos": [], "definitions": []},
+                )
+
+                for synset_id in senses:
+                    if synset_id not in bucket["synsets"]:
                         bucket["synsets"].append(synset_id)
-                    if pos and pos not in bucket["pos"]:
-                        bucket["pos"].append(pos)
+
+                    meta = synsets.get(synset_id)
+                    if not meta:
+                        continue
+
+                    synset_pos = str(meta.get("pos", ""))
+                    if synset_pos and synset_pos not in bucket["pos"]:
+                        bucket["pos"].append(synset_pos)
+
+                    definition = str(meta.get("definition", ""))
                     if definition and definition not in bucket["definitions"]:
                         bucket["definitions"].append(definition)
 
-                elem.clear()
+                # Preserve lexical-entry POS when present.
+                if pos and pos not in bucket["pos"]:
+                    bucket["pos"].append(pos)
+
+            elem.clear()
 
     payload = {
         "source": "Arabic WordNet 4.1.0",
@@ -83,7 +136,10 @@ def build_index() -> None:
         "words": len(entries),
         "entries": entries,
     }
-    INDEX_FILE.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    INDEX_FILE.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
     print(f"Indexed {len(entries):,} Arabic lemmas from {synset_count:,} synsets")
 
 
