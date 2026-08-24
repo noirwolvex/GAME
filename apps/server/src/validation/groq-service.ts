@@ -139,10 +139,12 @@ export async function validateWordWithGroq(word: string, requestedCategory: Cate
     if (!response.ok) {
       const retryAfter = response.headers.get("retry-after");
       const requestId = response.headers.get("x-request-id");
+      const errorBody = await response.text();
       console.error(
         `[GROQ] HTTP ${response.status} ${response.statusText || ""}`.trim(),
         JSON.stringify({ retryAfter, requestId }),
       );
+      console.error("[GROQ] error body:", errorBody || "<empty>");
       return null;
     }
 
