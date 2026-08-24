@@ -128,7 +128,6 @@ export async function validateWordWithGemini(
                 reason: { type: "string" },
               },
               required: ["valid", "category", "confidence", "reason"],
-              additionalProperties: false,
             },
           },
         }),
