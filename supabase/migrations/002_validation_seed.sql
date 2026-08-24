@@ -5,7 +5,7 @@ values
   ('مريم', 'مريم', 'human', '{}', 'accepted', 1.000, 'seed'),
   ('ماهر', 'ماهر', 'human', '{}', 'accepted', 1.000, 'seed'),
   ('ماعز', 'ماعز', 'animal', '{}', 'accepted', 1.000, 'seed'),
-  ('مها', 'مها', '{}', 'accepted', 1.000, 'seed'),
+  ('مها', 'مها', 'animal', '{}', 'accepted', 1.000, 'seed'),
   ('موز', 'موز', 'plant', '{}', 'accepted', 1.000, 'seed'),
   ('مانجو', 'مانجو', 'plant', '{}', 'accepted', 1.000, 'seed'),
   ('مفتاح', 'مفتاح', 'object', '{}', 'accepted', 1.000, 'seed'),
