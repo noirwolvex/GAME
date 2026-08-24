@@ -57,16 +57,11 @@ export interface GameRound {
   submissions: AnswerSet[];
 }
 
-export interface AnswerValidationOverride {
-  valid: boolean;
-  reason: AnswerReason;
-}
-
 export type AnswerValidator = (
   category: Category,
   answer: string | undefined,
   letter: string,
-) => AnswerValidationOverride | null;
+) => { valid: boolean; reason: AnswerReason } | null | undefined;
 
 export const ARABIC_LETTERS = [
   "ا", "ب", "ت", "ث", "ج", "ح", "خ", "د", "ذ", "ر", "ز",
@@ -88,7 +83,7 @@ const ANSWER_BANK: Record<Category, readonly string[]> = {
     "فيل", "قرد", "كلب", "لقلق", "هدهد", "وحيد القرن", "يمامة", "يربوع", "يعسوب",
   ],
   plant: [
-    "موز", "مانجو", "مشمش", "ملوخية", "مريمية", "نخلة", "نعناع", "نرجس",
+    "موز", "مانجو", "مشمش", "ملوخية", "مريمية", "نخلة", "نعناع", "نرجس", "نبات",
     "أرز", "أقحوان", "بقدونس", "بامية", "بنفسج", "تفاح", "تين", "جرجير", "جزر", "حبق",
     "خس", "خزامى", "رمان", "ريحان", "زعتر", "زيتون", "سدر", "سمسم", "صبار", "عنب",
     "فلفل", "قرنفل", "كزبرة", "ليمون", "ورد", "ياسمين", "يقطين", "بابونج", "بطاطا", "برسيم",
@@ -112,7 +107,7 @@ export function normalizeAnswer(value: string): string {
     .trim()
     .toLocaleLowerCase()
     .replace(/[ًٌٍَُِّْـ]/g, "")
-    .replace(/[أإآ]/g, "ا")
+    .replace(/[أإآٱ]/g, "ا")
     .replace(/ة/g, "ه")
     .replace(/ى/g, "ي");
 }
@@ -175,8 +170,14 @@ export function startRound(round: GameRound, now = Date.now()): GameRound {
   };
 }
 
+const SUBMISSION_GRACE_MS = 250;
+
 export function canSubmit(round: GameRound, now = Date.now()): boolean {
-  return round.state === "playing" && round.endsAt !== null && now <= round.endsAt;
+  return (
+    round.state === "playing" &&
+    round.endsAt !== null &&
+    now <= round.endsAt + SUBMISSION_GRACE_MS
+  );
 }
 
 export function submitAnswers(
