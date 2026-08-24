@@ -303,7 +303,7 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
   // Gemini is the final external fallback after Wikipedia, Groq, and Wikidata.
   const gemini = await validateWordWithGemini(local.value, local.category);
   if (gemini) {
-    if (gemini.valid && gemini.category === local.category && gemini.confidence >= 0.80) {
+    if (gemini.valid && gemini.category === local.category && gemini.confidence >= 0.45) {
       return {
         ...local,
         decision: "accept",
