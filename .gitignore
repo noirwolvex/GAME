@@ -14,3 +14,5 @@ coverage/
 # Local validation source data and generated indexes
 data/arabic-wordnet/*.gz
 data/arabic-wordnet/index.json
+data/arabic-wordnet/game-index.json
+data/wikidata/*.json
