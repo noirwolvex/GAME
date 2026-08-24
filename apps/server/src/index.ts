@@ -13,6 +13,7 @@ import {
   type Category,
 } from "@game/game-engine";
 import { validateWithHybridSources } from "./validation/service";
+import { validateArabicGivenName } from "./validation/name-service";
 
 const app = express();
 app.use(cors());
@@ -43,7 +44,21 @@ app.post("/validation/check", async (req, res) => {
     return;
   }
 
-  const result = await validateWithHybridSources(value, category, letter);
+  let result = await validateWithHybridSources(value, category, letter);
+
+  if (category === "human" && result.decision === "review" && value?.trim()) {
+    const nameEvidence = await validateArabicGivenName(value.trim());
+    if (nameEvidence && result.decision === "review") {
+      result = {
+        ...result,
+        decision: "accept",
+        reason: "known_word",
+        confidence: nameEvidence.confidence,
+        sources: [nameEvidence.source],
+      };
+    }
+  }
+
   res.json({ ok: true, result });
 });
 
