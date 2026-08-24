@@ -73,22 +73,35 @@ function classifyArabicDescription(description: string): Category | null {
     "دولة", "بلد", "جمهورية", "مملكة", "إمارة", "سلطنة", "اتحاد دول",
     "دولة مدينة", "دولة-مدينة", "مدينة دولة", "مدينة-دولة", "دولة ذات سيادة",
   ])) return "country";
+
   if (containsAny(text, [
-    "شخص", "إنسان", "سياسي", "سياسية", "كاتب", "كاتبة", "لاعب", "لاعبة",
-    "ممثل", "ممثلة", "مغني", "مغنية", "عالم", "عالمة", "مخترع", "مخترعة",
-    "رئيس", "رئيسة", "ملكة", "ملك", "أمير", "أميرة",
+    "اسم علم", "اسم شخص", "اسم علم مؤنث", "اسم علم مذكر", "اسم عربي",
+    "اسم مؤنث", "اسم مذكر", "اسم شخص عربي", "given name", "personal name",
+    "female given name", "male given name", "شخص", "إنسان", "سياسي", "سياسية",
+    "كاتب", "كاتبة", "لاعب", "لاعبة", "ممثل", "ممثلة", "مغني", "مغنية",
+    "عالم", "عالمة", "مخترع", "مخترعة", "رئيس", "رئيسة", "ملكة", "ملك",
+    "أمير", "أميرة",
   ])) return "human";
+
   if (containsAny(text, [
-    "حيوان", "ثديي", "ثدييات", "طائر", "زاحف", "برمائي", "سمكة", "حشرة",
-    "رخوي", "قشري", "عنكبي",
+    "حيوان", "حيوانات", "ثديي", "ثدييات", "طائر", "طيور", "زاحف", "زواحف",
+    "برمائي", "برمائيات", "سمكة", "أسماك", "حشرة", "حشرات", "رتبة الحشرات",
+    "رخوي", "رخويات", "قشري", "قشريات", "عنكبي", "عنكبيات", "جنس من الحشرات",
+    "نوع من الحشرات", "نوع من الحيوانات", "جنس من الحيوانات",
   ])) return "animal";
+
   if (containsAny(text, [
-    "نبات", "شجرة", "شجيرة", "زهرة", "عشبة", "عشب", "نخلة", "كرمة",
+    "نبات", "نباتات", "شجرة", "أشجار", "شجيرة", "شجيرات", "زهرة", "أزهار",
+    "عشبة", "أعشاب", "عشب", "نخلة", "نخيل", "كرمة", "فاكهة", "فواكه",
+    "خضروات", "نباتي",
   ])) return "plant";
+
   if (containsAny(text, [
-    "أداة", "جهاز", "آلة", "مركبة", "سيارة", "مبنى", "منتج", "قطعة", "مادة",
-    "شيء", "جسم", "أثاث", "ملابس", "كتاب",
+    "أداة", "أدوات", "جهاز", "أجهزة", "آلة", "آلات", "مركبة", "مركبات",
+    "سيارة", "سيارات", "مبنى", "مبان", "منتج", "منتجات", "قطعة", "مادة",
+    "مواد", "شيء", "أشياء", "جسم", "أجسام", "أثاث", "ملابس", "كتاب", "كتب",
   ])) return "object";
+
   return null;
 }
 
@@ -227,7 +240,6 @@ async function queryWikipedia(word: string): Promise<ExternalEvidence | null> {
 async function validateExternally(local: ValidationResult): Promise<ValidationResult & { sources?: string[] }> {
   if (!local.normalized) return local;
 
-  // 1) Wikipedia: first external source, for every GAME category.
   const wikipedia = await queryWikipedia(local.normalized);
   if (wikipedia) {
     if (wikipedia.category === local.category && wikipedia.confidence >= 0.80) {
@@ -248,7 +260,6 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
     };
   }
 
-  // 2) Groq: second external source, for every GAME category.
   const groq = await validateWordWithGroq(local.normalized, local.category);
   if (groq) {
     if (groq.valid && groq.category === local.category && groq.confidence >= 0.10) {
@@ -271,7 +282,6 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
     }
   }
 
-  // 3) Wikidata: tertiary fallback, after Wikipedia and Groq.
   const wikidata = await queryWikidata(local.normalized);
   if (wikidata) {
     if (wikidata.category === local.category && wikidata.confidence >= 0.90) {
@@ -294,7 +304,6 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
     }
   }
 
-  // 4) Human-name lexicon: final human-only supplement.
   if (local.category === "human") {
     const nameEvidence = await validateArabicGivenName(local.normalized);
     if (nameEvidence) {
