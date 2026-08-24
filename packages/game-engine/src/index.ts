@@ -7,7 +7,6 @@ export const DEFAULT_CATEGORIES = [
 ] as const;
 
 export type Category = (typeof DEFAULT_CATEGORIES)[number];
-
 export type RoundState = "waiting" | "playing" | "review" | "finished";
 
 export interface RoundConfig {
@@ -22,11 +21,18 @@ export interface AnswerSet {
   submittedAt: number;
 }
 
+export type AnswerReason =
+  | "empty"
+  | "too_short"
+  | "wrong_letter"
+  | "wrong_category"
+  | "accepted";
+
 export interface ValidatedAnswer {
   category: Category;
   value: string;
   valid: boolean;
-  reason: "empty" | "wrong_letter" | "accepted";
+  reason: AnswerReason;
 }
 
 export interface PlayerScore {
@@ -56,17 +62,58 @@ export const ARABIC_LETTERS = [
   "ل", "م", "ن", "ه", "و", "ي",
 ] as const;
 
+const ANSWER_BANK: Record<Category, readonly string[]> = {
+  human: [
+    "محمد", "مريم", "ماجد", "منى", "محمود", "مصطفى", "منصور", "مروان", "مهدي", "مراد",
+    "سارة", "سعيد", "سلمان", "سامي", "سميرة", "سلمان", "شيماء", "شيرين", "صالح", "صفاء",
+    "علي", "عمر", "عائشة", "عادل", "عمار", "فهد", "فاطمة", "فارس", "كريم", "ليان",
+    "ليلى", "مازن", "نورة", "نور", "هاني", "هند", "وليد", "ياسر", "يوسف", "ياسمين",
+  ],
+  animal: [
+    "ماعز", "مهر", "ماعز", "محمرة", "مها", "نمر", "نحلة", "نعامة", "نسر", "ناموسة",
+    "أسد", "أرنب", "بقرة", "بطة", "بطريق", "جمل", "جرو", "حمار", "حصان", "خروف",
+    "دلفين", "ذئب", "راكون", "زرافة", "سمكة", "سنجاب", "صقر", "ضبع", "عقرب", "غزال",
+    "فيل", "قرد", "كلب", "لقلق", "موزة البحر", "هدهد", "وحيد القرن", "يمامة", "يربوع", "يعسوب",
+  ],
+  plant: [
+    "موز", "مانجو", "مشمش", "ملوخية", "مريمية", "مريمية", "نخلة", "نعناع", "نرجس", "نبات",
+    "أرز", "أقحوان", "بقدونس", "بامية", "بنفسج", "تفاح", "تين", "جرجير", "جزر", "حبق",
+    "خس", "خزامى", "رمان", "ريحان", "زعتر", "زيتون", "سدر", "سمسم", "صبار", "عنب",
+    "فلفل", "قرنفل", "كزبرة", "ليمون", "ورد", "ياسمين", "يقطين", "بابونج", "بطاطا", "برسيم",
+  ],
+  object: [
+    "مفتاح", "مكتب", "ملعقة", "مرآة", "مقص", "مصباح", "منضدة", "مروحة", "مغسلة", "مجلد",
+    "باب", "بطانية", "بطارية", "تلفاز", "ثلاجة", "جهاز", "حقيبة", "خزانة", "دراجة", "ساعة",
+    "سيارة", "صندوق", "طبق", "طاولة", "علبة", "غسالة", "فرشاة", "قلم", "كتاب", "كرسي",
+    "لوحة", "ممحاة", "نافذة", "هاتف", "ورقة", "يافطة", "ابريق", "اجراس", "اسفنجة", "مسمار",
+  ],
+  country: [
+    "مصر", "ماليزيا", "مالطا", "مغرب", "موريتانيا", "مدغشقر", "موزمبيق", "مقدونيا", "منغوليا", "مكسيكا",
+    "البحرين", "الإمارات", "الأردن", "ألمانيا", "إسبانيا", "إيطاليا", "أستراليا", "إندونيسيا", "البرازيل", "بلجيكا",
+    "تونس", "تركيا", "الجزائر", "السعودية", "السودان", "الصين", "العراق", "العراق", "عمان", "فرنسا",
+    "فلسطين", "قطر", "كندا", "كرواتيا", "لبنان", "ليبيا", "نيبال", "نيجيريا", "هولندا", "اليابان",
+  ],
+};
+
 export function normalizeAnswer(value: string): string {
   return value
     .trim()
     .toLocaleLowerCase()
-    .replace(/[ًٌٍَُِّْـ]/g, "");
+    .replace(/[ًٌٍَُِّْـ]/g, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي");
 }
 
 export function startsWithLetter(answer: string, letter: string): boolean {
   const normalizedAnswer = normalizeAnswer(answer);
   const normalizedLetter = normalizeAnswer(letter);
   return normalizedAnswer.length > 0 && normalizedAnswer.startsWith(normalizedLetter);
+}
+
+export function isKnownCategoryAnswer(category: Category, answer: string): boolean {
+  const normalized = normalizeAnswer(answer);
+  return ANSWER_BANK[category].some((candidate) => normalizeAnswer(candidate) === normalized);
 }
 
 export function pickRandomLetter(letters: readonly string[] = ARABIC_LETTERS): string {
@@ -145,13 +192,22 @@ export function validateAnswer(
   letter: string,
 ): ValidatedAnswer {
   const value = answer?.trim() ?? "";
+  const normalized = normalizeAnswer(value);
 
-  if (!value) {
+  if (!normalized) {
     return { category, value, valid: false, reason: "empty" };
+  }
+
+  if (normalized.length < 2) {
+    return { category, value, valid: false, reason: "too_short" };
   }
 
   if (!startsWithLetter(value, letter)) {
     return { category, value, valid: false, reason: "wrong_letter" };
+  }
+
+  if (!isKnownCategoryAnswer(category, value)) {
+    return { category, value, valid: false, reason: "wrong_category" };
   }
 
   return { category, value, valid: true, reason: "accepted" };
@@ -165,12 +221,6 @@ export function finishRound(
     throw new Error("Only playing rounds can be finished");
   }
 
-  const byCategory = new Map<Category, ValidatedAnswer[][]>();
-
-  for (const category of round.config.categories) {
-    byCategory.set(category, []);
-  }
-
   const validated = new Map<string, ValidatedAnswer[]>();
 
   for (const submission of round.submissions) {
@@ -178,11 +228,6 @@ export function finishRound(
       validateAnswer(category, submission.answers[category], round.config.letter),
     );
     validated.set(submission.playerId, answers);
-
-    for (const answer of answers) {
-      const values = byCategory.get(answer.category);
-      if (values) values.push([answer]);
-    }
   }
 
   const scores: PlayerScore[] = round.submissions.map((submission) => {
@@ -192,14 +237,13 @@ export function finishRound(
     for (const answer of answers) {
       if (!answer.valid) continue;
 
-      const competing = round.submissions.filter(
-        (other) => other.playerId !== submission.playerId,
-      );
-      const same = competing.some(
-        (other) =>
-          normalizeAnswer(other.answers[answer.category] ?? "") ===
-          normalizeAnswer(answer.value),
-      );
+      const same = round.submissions
+        .filter((other) => other.playerId !== submission.playerId)
+        .some(
+          (other) =>
+            normalizeAnswer(other.answers[answer.category] ?? "") ===
+            normalizeAnswer(answer.value),
+        );
 
       points += same ? 5 : 10;
     }
