@@ -27,7 +27,7 @@ async function fetchJson(url: string): Promise<any | null> {
       signal: controller.signal,
       headers: {
         Accept: "application/json",
-        "User-Agent": "GAME-validation/0.8 (NOIR WOLVEX)",
+        "User-Agent": "GAME-validation/0.9 (NOIR WOLVEX)",
       },
     });
     if (!response.ok) return null;
@@ -94,6 +94,18 @@ export async function validateArabicGivenName(word: string): Promise<NameValidat
   const normalized = normalizeArabic(word);
   if (!normalized) return null;
 
+  // For an unknown human name, query Groq first so common names do not depend
+  // on a dictionary/Wiktionary page existing.
+  const groq = await validateArabicHumanNameWithGroq(word);
+  if (groq?.valid && groq.confidence >= 0.90) {
+    return {
+      category: "human",
+      confidence: groq.confidence,
+      source: groq.source,
+    };
+  }
+
+  // Deterministic lexical fallback.
   const directExtract = await fetchExactPage(word);
   const extract = directExtract || await fetchSearchPage(word);
 
@@ -102,15 +114,6 @@ export async function validateArabicGivenName(word: string): Promise<NameValidat
       category: "human",
       confidence: 0.95,
       source: "wiktionary-name",
-    };
-  }
-
-  const groq = await validateArabicHumanNameWithGroq(word);
-  if (groq?.valid && groq.confidence >= 0.90) {
-    return {
-      category: "human",
-      confidence: groq.confidence,
-      source: groq.source,
     };
   }
 
