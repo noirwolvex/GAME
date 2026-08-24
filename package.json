@@ -14,6 +14,7 @@
     "validation:awn:classify": "python scripts/classify-awn.py",
     "validation:awn:expand": "python scripts/classify-awn-expanded.py",
     "validation:awn:review": "python scripts/classify-awn-review.py",
+    "validation:merge-review": "python scripts/merge-awn-review.py",
     "validation:build-index": "python scripts/build-validation-index.py",
     "validation:wikidata": "python scripts/import-wikidata.py",
     "validation:omw": "python scripts/import-omw.py",
