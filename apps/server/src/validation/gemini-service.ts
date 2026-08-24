@@ -12,7 +12,7 @@ export interface GeminiValidationResult {
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite";
-const GEMINI_TIMEOUT_MS = 5000;
+const GEMINI_TIMEOUT_MS = 8000;
 const LOCAL_DAILY_CAP = 300;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CATEGORIES: readonly Category[] = ["human", "animal", "plant", "object", "country"];
@@ -102,7 +102,7 @@ export async function validateWordWithGemini(
             parts: [
               {
                 text:
-                  "You are the final validator for an Arabic word game. Classify the supplied Arabic word into exactly one category: human, animal, plant, object, or country. Accept established Arabic words and recognized personal names. Do not invent facts for arbitrary strings. Return only the requested JSON structure.",
+                  "You are an independent final validator for an Arabic word game. You must not trust or repeat another AI's decision. Use your own knowledge first, and use Google Search grounding to verify the word independently when the request reaches you. Determine whether the submitted Arabic word is a real, recognized term/name and whether it belongs to exactly one of these categories: human, animal, plant, object, country. Do not accept random or invented strings. Prefer evidence from reliable search results, dictionaries, encyclopedias, official sources, or established usage. Return only the requested JSON structure.",
               },
             ],
           },
@@ -111,9 +111,14 @@ export async function validateWordWithGemini(
               role: "user",
               parts: [
                 {
-                  text: `Arabic word: ${word}\nRequested category: ${requestedCategory}\nDecide whether the word reasonably belongs to the requested category.`,
+                  text: `Arabic word: ${word}\nRequested category: ${requestedCategory}\nVerify this word independently. Search the web if needed. Do not rely on any prior AI result. Decide whether the word is genuinely recognized and belongs to the requested category.`,
                 },
               ],
+            },
+          ],
+          tools: [
+            {
+              googleSearch: {},
             },
           ],
           generationConfig: {
