@@ -94,10 +94,10 @@ export async function validateArabicGivenName(word: string): Promise<NameValidat
   const normalized = normalizeArabic(word);
   if (!normalized) return null;
 
-  // For an unknown human name, query Groq first so common names do not depend
-  // on a dictionary/Wiktionary page existing.
+  // Groq is the first fallback for unknown human names so common names do not
+  // depend on a dictionary/Wiktionary page existing.
   const groq = await validateArabicHumanNameWithGroq(word);
-  if (groq?.valid && groq.confidence >= 0.90) {
+  if (groq?.valid && groq.confidence >= 0.75) {
     return {
       category: "human",
       confidence: groq.confidence,
