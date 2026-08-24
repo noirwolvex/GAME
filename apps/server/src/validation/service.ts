@@ -1,7 +1,7 @@
 import { validateWord, type ValidationResult } from "@game/validation";
 import type { Category } from "@game/game-engine";
 import { validateArabicGivenName } from "./name-service";
-import { validateArabicHumanNameWithGroq } from "./groq-service";
+import { validateWordWithGroq } from "./groq-service";
 
 interface SupabaseRow {
   word: string;
@@ -16,7 +16,7 @@ interface SupabaseRow {
 type ExternalDecision = {
   category: Category;
   confidence: number;
-  reason: "known_word" | "known_alias";
+  reason: "known_word" | "known_alias" | "category_mismatch";
   sources: string[];
 };
 
@@ -225,38 +225,74 @@ async function queryWikipedia(word: string): Promise<ExternalEvidence | null> {
 }
 
 async function resolveExternal(value: string, requestedCategory: Category): Promise<ExternalDecision | null> {
-  const [wikidata, wikipedia] = await Promise.all([queryWikidata(value), queryWikipedia(value)]);
-  const evidence = [wikidata, wikipedia].filter((item): item is ExternalEvidence => Boolean(item));
-  const matching = evidence.filter((item) => item.category === requestedCategory);
+  // Wikipedia is the first external source after the local GAME index.
+  const wikipedia = await queryWikipedia(value);
+  if (wikipedia) {
+    if (wikipedia.category === requestedCategory && wikipedia.confidence >= 0.80) {
+      return {
+        category: requestedCategory,
+        confidence: wikipedia.confidence,
+        reason: "known_word",
+        sources: [wikipedia.source],
+      };
+    }
+    return {
+      category: wikipedia.category,
+      confidence: wikipedia.confidence,
+      reason: "category_mismatch",
+      sources: [wikipedia.source],
+    };
+  }
 
-  if (matching.length >= 2) {
+  // Wikidata is supplementary evidence, but only after Wikipedia failed to identify the word.
+  const wikidata = await queryWikidata(value);
+  if (wikidata) {
+    if (wikidata.category === requestedCategory && wikidata.confidence >= 0.90) {
+      return {
+        category: requestedCategory,
+        confidence: wikidata.confidence,
+        reason: "known_word",
+        sources: [wikidata.source],
+      };
+    }
     return {
-      category: requestedCategory,
-      confidence: Math.min(0.99, Math.max(...matching.map((item) => item.confidence)) + 0.01),
-      reason: "known_word",
-      sources: matching.map((item) => item.source),
+      category: wikidata.category,
+      confidence: wikidata.confidence,
+      reason: "category_mismatch",
+      sources: [wikidata.source],
     };
   }
-  const strongest = matching.sort((a, b) => b.confidence - a.confidence)[0];
-  if (strongest?.exact && strongest.confidence >= 0.90) {
-    return {
-      category: requestedCategory,
-      confidence: strongest.confidence,
-      reason: "known_word",
-      sources: [strongest.source],
-    };
-  }
+
   return null;
 }
 
 async function validateExternally(local: ValidationResult): Promise<ValidationResult & { sources?: string[] }> {
   if (!local.normalized) return local;
 
-  // For human answers, ask Groq immediately after the local dictionary misses.
-  // This makes common Arabic given names useful even when they have no exact encyclopedia page.
-  if (local.category === "human") {
-    const groq = await validateArabicHumanNameWithGroq(local.normalized);
-    if (groq?.valid && groq.confidence >= 0.90) {
+  const external = await resolveExternal(local.normalized, local.category);
+  if (external) {
+    if (external.reason === "category_mismatch") {
+      return {
+        ...local,
+        decision: "reject",
+        reason: "category_mismatch",
+        confidence: external.confidence,
+        sources: external.sources,
+      };
+    }
+    return {
+      ...local,
+      decision: "accept",
+      reason: external.reason,
+      confidence: external.confidence,
+      sources: external.sources,
+    };
+  }
+
+  // Final AI fallback for EVERY GAME category.
+  const groq = await validateWordWithGroq(local.normalized, local.category);
+  if (groq) {
+    if (groq.valid && groq.category === local.category && groq.confidence >= 0.10) {
       return {
         ...local,
         decision: "accept",
@@ -265,13 +301,18 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
         sources: [groq.source],
       };
     }
+    if (groq.category !== local.category && groq.confidence >= 0.75) {
+      return {
+        ...local,
+        decision: "reject",
+        reason: "category_mismatch",
+        confidence: groq.confidence,
+        sources: [groq.source],
+      };
+    }
   }
 
-  const external = await resolveExternal(local.normalized, local.category);
-  if (external) {
-    return { ...local, decision: "accept", reason: external.reason, confidence: external.confidence, sources: external.sources };
-  }
-
+  // Name-specific source remains a final human-only supplement after the generic pipeline.
   if (local.category === "human") {
     const nameEvidence = await validateArabicGivenName(local.normalized);
     if (nameEvidence) {
