@@ -29,6 +29,7 @@ export interface ValidationResult {
 }
 
 const MIN_ANSWER_LENGTH = 2;
+const DEFINITE_ARTICLE = "ال";
 
 const SEED_DICTIONARY: readonly DictionaryEntry[] = [
   { word: "محمد", category: "human", aliases: ["محمّد"] },
@@ -64,10 +65,21 @@ export function normalizeArabic(value: string): string {
     .replace(/\s+/g, " ");
 }
 
+export function validationForm(value: string): { normalized: string; letterForm: string } {
+  const normalized = normalizeArabic(value);
+  const letterForm = normalized.startsWith(DEFINITE_ARTICLE) && normalized.length > DEFINITE_ARTICLE.length
+    ? normalized.slice(DEFINITE_ARTICLE.length)
+    : normalized;
+  return { normalized, letterForm };
+}
+
 export function startsWithArabicLetter(value: string, letter: string): boolean {
-  const normalizedValue = normalizeArabic(value);
+  const { normalized, letterForm } = validationForm(value);
   const normalizedLetter = normalizeArabic(letter);
-  return normalizedValue.length > 0 && normalizedValue.startsWith(normalizedLetter);
+  return (
+    normalized.length > 0 &&
+    (normalized.startsWith(normalizedLetter) || letterForm.startsWith(normalizedLetter))
+  );
 }
 
 export function createDictionary(entries: readonly DictionaryEntry[] = SEED_DICTIONARY) {
@@ -99,7 +111,7 @@ export function validateWord(
   dictionary = DEFAULT_DICTIONARY,
 ): ValidationResult {
   const original = value?.trim() ?? "";
-  const normalized = normalizeArabic(original);
+  const { normalized } = validationForm(original);
 
   if (!normalized) {
     return { value: original, normalized, category, letter, decision: "reject", reason: "empty", confidence: 1 };
