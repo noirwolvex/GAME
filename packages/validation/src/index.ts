@@ -1,7 +1,7 @@
 import type { Category } from "@game/game-engine";
+import { GAME_INDEX_ENTRIES } from "./game-index.generated";
 
 export type ValidationDecision = "accept" | "review" | "reject";
-
 export type ValidationReason =
   | "empty"
   | "too_short"
@@ -15,6 +15,7 @@ export interface DictionaryEntry {
   word: string;
   category: Category;
   aliases?: readonly string[];
+  confidence?: number;
 }
 
 export interface ValidationResult {
@@ -71,7 +72,6 @@ export function startsWithArabicLetter(value: string, letter: string): boolean {
 
 export function createDictionary(entries: readonly DictionaryEntry[] = SEED_DICTIONARY) {
   const exact = new Map<string, DictionaryEntry[]>();
-
   for (const entry of entries) {
     const values = [entry.word, ...(entry.aliases ?? [])];
     for (const value of values) {
@@ -81,11 +81,16 @@ export function createDictionary(entries: readonly DictionaryEntry[] = SEED_DICT
       exact.set(key, current);
     }
   }
-
   return exact;
 }
 
-export const DEFAULT_DICTIONARY = createDictionary();
+const GENERATED_DICTIONARY: readonly DictionaryEntry[] = GAME_INDEX_ENTRIES.map((entry) => ({
+  word: entry.word,
+  category: entry.category,
+  confidence: entry.confidence,
+}));
+
+export const DEFAULT_DICTIONARY = createDictionary([...SEED_DICTIONARY, ...GENERATED_DICTIONARY]);
 
 export function validateWord(
   value: string | undefined,
@@ -97,39 +102,13 @@ export function validateWord(
   const normalized = normalizeArabic(original);
 
   if (!normalized) {
-    return {
-      value: original,
-      normalized,
-      category,
-      letter,
-      decision: "reject",
-      reason: "empty",
-      confidence: 1,
-    };
+    return { value: original, normalized, category, letter, decision: "reject", reason: "empty", confidence: 1 };
   }
-
   if (normalized.length < MIN_ANSWER_LENGTH) {
-    return {
-      value: original,
-      normalized,
-      category,
-      letter,
-      decision: "reject",
-      reason: "too_short",
-      confidence: 1,
-    };
+    return { value: original, normalized, category, letter, decision: "reject", reason: "too_short", confidence: 1 };
   }
-
   if (!startsWithArabicLetter(normalized, letter)) {
-    return {
-      value: original,
-      normalized,
-      category,
-      letter,
-      decision: "reject",
-      reason: "wrong_letter",
-      confidence: 1,
-    };
+    return { value: original, normalized, category, letter, decision: "reject", reason: "wrong_letter", confidence: 1 };
   }
 
   const entries = dictionary.get(normalized) ?? [];
@@ -137,6 +116,7 @@ export function validateWord(
 
   if (matching.length > 0) {
     const exact = matching.some((entry) => normalizeArabic(entry.word) === normalized);
+    const confidence = Math.max(...matching.map((entry) => entry.confidence ?? (exact ? 1 : 0.99)));
     return {
       value: original,
       normalized,
@@ -144,33 +124,24 @@ export function validateWord(
       letter,
       decision: "accept",
       reason: exact ? "known_word" : "known_alias",
-      confidence: exact ? 1 : 0.99,
+      confidence,
     };
   }
 
   if (entries.length > 0) {
-    return {
-      value: original,
-      normalized,
-      category,
-      letter,
-      decision: "reject",
-      reason: "category_mismatch",
-      confidence: 0.99,
-    };
+    return { value: original, normalized, category, letter, decision: "reject", reason: "category_mismatch", confidence: 0.99 };
   }
 
-  return {
-    value: original,
-    normalized,
-    category,
-    letter,
-    decision: "review",
-    reason: "unknown_word",
-    confidence: 0.5,
-  };
+  return { value: original, normalized, category, letter, decision: "review", reason: "unknown_word", confidence: 0.5 };
 }
 
 export function seedDictionary(): readonly DictionaryEntry[] {
   return SEED_DICTIONARY;
+}
+
+export function validationDictionaryStats() {
+  return {
+    generatedEntries: GENERATED_DICTIONARY.length,
+    totalEntries: DEFAULT_DICTIONARY.size,
+  };
 }
