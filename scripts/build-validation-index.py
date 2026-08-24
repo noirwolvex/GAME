@@ -4,14 +4,14 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "data" / "arabic-wordnet" / "game-index.json"
+SOURCE = ROOT / "data" / "validation" / "master-index.json"
 OUTPUT = ROOT / "packages" / "validation" / "src" / "game-index.generated.ts"
 
 
 def main() -> int:
     if not SOURCE.exists():
         raise SystemExit(
-            f"Missing {SOURCE}. Run: npm run validation:awn:classify"
+            f"Missing {SOURCE}. Run: npm run validation:merge"
         )
 
     payload = json.loads(SOURCE.read_text(encoding="utf-8"))
@@ -40,7 +40,7 @@ def main() -> int:
         "  confidence: number;",
         "}",
         "",
-        "// Generated locally from data/arabic-wordnet/game-index.json.",
+        "// Generated from data/validation/master-index.json.",
         "// Do not edit by hand. Regenerate with: npm run validation:build-index",
         "export const GAME_INDEX_ENTRIES: readonly GeneratedEntry[] = [",
     ]
@@ -60,7 +60,7 @@ def main() -> int:
     ])
 
     OUTPUT.write_text("\n".join(lines), encoding="utf-8")
-    print(f"Generated {len(generated):,} GAME validation entries")
+    print(f"Generated {len(generated):,} GAME validation entries from master-index")
     print(f"Done: {OUTPUT}")
     return 0
 
