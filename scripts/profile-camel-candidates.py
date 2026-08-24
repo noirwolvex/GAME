@@ -34,7 +34,14 @@ def main() -> int:
 
     connection = sqlite3.connect(CAMEL_DB)
     try:
-        total = connection.execute("SELECT COUNT(*) FROM words").fetchone()[0]
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "candidates" not in tables:
+            raise SystemExit(
+                "Invalid CAMeL candidate DB: expected table 'candidates'. "
+                "Rebuild with: npm run validation:camelfreq"
+            )
+
+        total = connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0]
         exact = 0
         unseen = 0
         short = 0
@@ -42,7 +49,7 @@ def main() -> int:
         lengths: dict[int, int] = {}
         unseen_by_initial: dict[str, int] = {}
 
-        cursor = connection.execute("SELECT word FROM words ORDER BY rowid")
+        cursor = connection.execute("SELECT word FROM candidates ORDER BY rowid")
         for (word,) in cursor:
             normalized = normalize(str(word))
             if len(normalized) < 2:
