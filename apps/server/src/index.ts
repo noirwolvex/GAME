@@ -10,7 +10,9 @@ import {
   submitAnswers,
   type AnswerSet,
   type GameRound,
+  type Category,
 } from "@game/game-engine";
+import { validateWithHybridSources } from "./validation/service";
 
 const app = express();
 app.use(cors());
@@ -20,8 +22,29 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     service: "GAME",
-    version: "0.2.0",
+    version: "0.3.0",
   });
+});
+
+app.post("/validation/check", async (req, res) => {
+  const { value, category, letter } = req.body as {
+    value?: string;
+    category?: Category;
+    letter?: string;
+  };
+
+  if (!category || !letter) {
+    res.status(400).json({ ok: false, error: "category and letter are required" });
+    return;
+  }
+
+  if (!DEFAULT_CATEGORIES.includes(category)) {
+    res.status(400).json({ ok: false, error: "invalid category" });
+    return;
+  }
+
+  const result = await validateWithHybridSources(value, category, letter);
+  res.json({ ok: true, result });
 });
 
 const httpServer = createServer(app);
