@@ -1,6 +1,7 @@
 import { validateWord, type ValidationResult } from "@game/validation";
 import type { Category } from "@game/game-engine";
 import { validateArabicGivenName } from "./name-service";
+import { validateArabicHumanNameWithGroq } from "./groq-service";
 
 interface SupabaseRow {
   word: string;
@@ -30,7 +31,7 @@ const cache = new Map<string, { expiresAt: number; result: ValidationResult & { 
 const inFlight = new Map<string, Promise<ValidationResult & { sources?: string[] }>>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const EXTERNAL_TIMEOUT_MS = 3500;
-const WIKIMEDIA_USER_AGENT = "GAME-validation/0.9 (NOIR WOLVEX)";
+const WIKIMEDIA_USER_AGENT = "GAME-validation/1.0 (NOIR WOLVEX)";
 
 function cacheKey(value: string, category: Category, letter: string): string {
   return `${category}:${letter}:${value.trim()}`;
@@ -125,7 +126,6 @@ const DIRECT_CATEGORY_BY_QID: ReadonlyMap<string, Category> = new Map([
   ["Q3624078", "country"],
   ["Q237", "country"],
   ["Q223557", "object"],
-  // Wikidata WikiProject Names: given name / female / male / unisex given name.
   ["Q202444", "human"],
   ["Q11879590", "human"],
   ["Q12308941", "human"],
@@ -251,16 +251,34 @@ async function resolveExternal(value: string, requestedCategory: Category): Prom
 
 async function validateExternally(local: ValidationResult): Promise<ValidationResult & { sources?: string[] }> {
   if (!local.normalized) return local;
+
+  // For human answers, ask Groq immediately after the local dictionary misses.
+  // This makes common Arabic given names useful even when they have no exact encyclopedia page.
+  if (local.category === "human") {
+    const groq = await validateArabicHumanNameWithGroq(local.normalized);
+    if (groq?.valid && groq.confidence >= 0.90) {
+      return {
+        ...local,
+        decision: "accept",
+        reason: "known_word",
+        confidence: groq.confidence,
+        sources: [groq.source],
+      };
+    }
+  }
+
   const external = await resolveExternal(local.normalized, local.category);
   if (external) {
     return { ...local, decision: "accept", reason: external.reason, confidence: external.confidence, sources: external.sources };
   }
+
   if (local.category === "human") {
     const nameEvidence = await validateArabicGivenName(local.normalized);
     if (nameEvidence) {
       return { ...local, decision: "accept", reason: "known_word", confidence: nameEvidence.confidence, sources: [nameEvidence.source] };
     }
   }
+
   return local;
 }
 
