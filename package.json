@@ -12,6 +12,6 @@
     "server": "npm --workspace @game/server run dev",
     "validation:awn": "python scripts/download-awn.py",
     "validation:awn:classify": "python scripts/classify-awn.py",
-    "validation:build-index": "python scripts/build-game-validation.py"
+    "validation:build-index": "python scripts/build-validation-index.py"
   }
 }
