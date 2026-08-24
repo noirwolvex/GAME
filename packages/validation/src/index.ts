@@ -36,9 +36,20 @@ const SEED_DICTIONARY: readonly DictionaryEntry[] = [
   { word: "مريم", category: "human" },
   { word: "ماهر", category: "human" },
   { word: "منى", category: "human" },
+  { word: "نورة", category: "human" },
+  { word: "نورا", category: "human" },
+  { word: "حيدر", category: "human" },
+  { word: "مرام", category: "human" },
+  { word: "ضحى", category: "human" },
+  { word: "قاسم", category: "human" },
+  { word: "زهراء", category: "human" },
+  { word: "يحيى", category: "human" },
   { word: "أسد", category: "animal" },
   { word: "ماعز", category: "animal" },
   { word: "مها", category: "animal" },
+  { word: "نمر", category: "animal" },
+  { word: "نسر", category: "animal" },
+  { word: "يمامة", category: "animal" },
   { word: "موز", category: "plant" },
   { word: "مانجو", category: "plant" },
   { word: "مشمش", category: "plant" },
@@ -48,6 +59,7 @@ const SEED_DICTIONARY: readonly DictionaryEntry[] = [
   { word: "مصر", category: "country" },
   { word: "مالطا", category: "country" },
   { word: "مغرب", category: "country", aliases: ["المغرب"] },
+  { word: "الفاتيكان", category: "country", aliases: ["فاتيكان"] },
 ];
 
 function stripArabicMarks(value: string): string {
