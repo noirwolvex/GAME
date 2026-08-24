@@ -240,26 +240,20 @@ async function queryWikipedia(word: string): Promise<ExternalEvidence | null> {
 async function validateExternally(local: ValidationResult): Promise<ValidationResult & { sources?: string[] }> {
   if (!local.normalized) return local;
 
+  // Wikipedia is the first external source. A category conflict is only evidence,
+  // not a final rejection, because Wikipedia's lightweight Arabic classifier can be wrong.
   const wikipedia = await queryWikipedia(local.normalized);
-  if (wikipedia) {
-    if (wikipedia.category === local.category && wikipedia.confidence >= 0.80) {
-      return {
-        ...local,
-        decision: "accept",
-        reason: "known_word",
-        confidence: wikipedia.confidence,
-        sources: [wikipedia.source],
-      };
-    }
+  if (wikipedia && wikipedia.category === local.category && wikipedia.confidence >= 0.80) {
     return {
       ...local,
-      decision: "reject",
-      reason: "category_mismatch",
+      decision: "accept",
+      reason: "known_word",
       confidence: wikipedia.confidence,
       sources: [wikipedia.source],
     };
   }
 
+  // Any Wikipedia mismatch or unknown result proceeds to Groq.
   const groq = await validateWordWithGroq(local.normalized, local.category);
   if (groq) {
     if (groq.valid && groq.category === local.category && groq.confidence >= 0.10) {
@@ -268,7 +262,7 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
         decision: "accept",
         reason: "known_word",
         confidence: groq.confidence,
-        sources: [groq.source],
+        sources: wikipedia ? [wikipedia.source, groq.source] : [groq.source],
       };
     }
     if (groq.category !== local.category && groq.confidence >= 0.75) {
@@ -277,11 +271,12 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
         decision: "reject",
         reason: "category_mismatch",
         confidence: groq.confidence,
-        sources: [groq.source],
+        sources: wikipedia ? [wikipedia.source, groq.source] : [groq.source],
       };
     }
   }
 
+  // Wikidata is the tertiary fallback after Wikipedia and Groq.
   const wikidata = await queryWikidata(local.normalized);
   if (wikidata) {
     if (wikidata.category === local.category && wikidata.confidence >= 0.90) {
@@ -290,7 +285,7 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
         decision: "accept",
         reason: "known_word",
         confidence: wikidata.confidence,
-        sources: [wikidata.source],
+        sources: wikipedia ? [wikipedia.source, "wikidata-entity"] : ["wikidata-entity"],
       };
     }
     if (wikidata.category !== local.category && wikidata.confidence >= 0.90) {
@@ -299,7 +294,7 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
         decision: "reject",
         reason: "category_mismatch",
         confidence: wikidata.confidence,
-        sources: [wikidata.source],
+        sources: wikipedia ? [wikipedia.source, "wikidata-entity"] : ["wikidata-entity"],
       };
     }
   }
