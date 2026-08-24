@@ -4,21 +4,20 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE_SOURCE = ROOT / "data" / "validation" / "master-index.json"
+CAMEL_PROMOTED_SOURCE = ROOT / "data" / "validation" / "camel-promoted-index.json"
 REVIEW_SOURCE = ROOT / "data" / "validation" / "review-master-index.json"
 ELNER_SOURCE = ROOT / "data" / "validation" / "elner-master-index.json"
+BASE_SOURCE = ROOT / "data" / "validation" / "master-index.json"
 OUTPUT = ROOT / "packages" / "validation" / "src" / "game-index.generated.ts"
 CATEGORIES = {"human", "animal", "plant", "object", "country"}
 
 
 def choose_source() -> Path:
     # Prefer the most complete merged layer that exists locally.
-    for candidate in (REVIEW_SOURCE, ELNER_SOURCE, BASE_SOURCE):
+    for candidate in (CAMEL_PROMOTED_SOURCE, REVIEW_SOURCE, ELNER_SOURCE, BASE_SOURCE):
         if candidate.exists():
             return candidate
-    raise SystemExit(
-        f"Missing validation index. Run: npm run validation:merge"
-    )
+    raise SystemExit("Missing validation index. Run: npm run validation:merge")
 
 
 def main() -> int:
