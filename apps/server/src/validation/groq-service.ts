@@ -1,3 +1,5 @@
+import dotenv from "dotenv";
+import { resolve } from "node:path";
 import type { Category } from "@game/game-engine";
 
 export interface GroqValidationResult {
@@ -37,6 +39,13 @@ function todayKey(): string {
 }
 
 function canUseGroq(): boolean {
+  // Load the server env at request time so this module does not depend on
+  // ESM/CommonJS import ordering during `npm --workspace ... run dev`.
+  dotenv.config({
+    path: [resolve(process.cwd(), "apps/server/.env"), resolve(process.cwd(), ".env")],
+    override: true,
+  });
+
   if (!process.env.GROQ_API_KEY) {
     console.warn("[GROQ] skipped: GROQ_API_KEY is missing");
     return false;
@@ -103,7 +112,8 @@ export async function validateWordWithGroq(word: string, requestedCategory: Cate
       body: JSON.stringify({
         model: GROQ_MODEL,
         temperature: 0,
-        max_tokens: 160,
+        reasoning_effort: "low",
+        max_completion_tokens: 512,
         messages: [
           {
             role: "system",
