@@ -2,6 +2,15 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { Server } from "socket.io";
+import {
+  DEFAULT_CATEGORIES,
+  createRound,
+  finishRound,
+  startRound,
+  submitAnswers,
+  type AnswerSet,
+  type GameRound,
+} from "@game/game-engine";
 
 const app = express();
 app.use(cors());
@@ -11,7 +20,7 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     service: "GAME",
-    version: "0.1.0",
+    version: "0.2.0",
   });
 });
 
@@ -20,8 +29,107 @@ const io = new Server(httpServer, {
   cors: { origin: "*" },
 });
 
+const rounds = new Map<string, GameRound>();
+
 io.on("connection", (socket) => {
   console.log(`[GAME] player connected: ${socket.id}`);
+
+  socket.on("game:create-round", (payload: { durationSeconds?: number } = {}) => {
+    const round = createRound({
+      durationSeconds: payload.durationSeconds ?? 60,
+      categories: DEFAULT_CATEGORIES,
+    });
+
+    rounds.set(round.id, round);
+    socket.join(round.id);
+    socket.emit("game:round-created", round);
+  });
+
+  socket.on("game:join-round", (roundId: string) => {
+    const round = rounds.get(roundId);
+
+    if (!round) {
+      socket.emit("game:error", { code: "ROUND_NOT_FOUND" });
+      return;
+    }
+
+    socket.join(roundId);
+    socket.emit("game:round-state", round);
+  });
+
+  socket.on("game:start-round", (roundId: string) => {
+    const round = rounds.get(roundId);
+
+    if (!round) {
+      socket.emit("game:error", { code: "ROUND_NOT_FOUND" });
+      return;
+    }
+
+    try {
+      const started = startRound(round);
+      rounds.set(roundId, started);
+      io.to(roundId).emit("game:round-started", started);
+    } catch (error) {
+      socket.emit("game:error", {
+        code: "ROUND_CANNOT_START",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  socket.on(
+    "game:submit-answers",
+    (payload: Omit<AnswerSet, "submittedAt"> & { roundId: string }) => {
+      const round = rounds.get(payload.roundId);
+
+      if (!round) {
+        socket.emit("game:error", { code: "ROUND_NOT_FOUND" });
+        return;
+      }
+
+      try {
+        const updated = submitAnswers(round, {
+          playerId: payload.playerId,
+          answers: payload.answers,
+          submittedAt: Date.now(),
+        });
+
+        rounds.set(payload.roundId, updated);
+        socket.join(payload.roundId);
+        io.to(payload.roundId).emit("game:answers-submitted", {
+          playerId: payload.playerId,
+          submittedAt: updated.submissions.find(
+            (entry) => entry.playerId === payload.playerId,
+          )?.submittedAt,
+        });
+      } catch (error) {
+        socket.emit("game:error", {
+          code: "ANSWERS_REJECTED",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    },
+  );
+
+  socket.on("game:finish-round", (roundId: string) => {
+    const round = rounds.get(roundId);
+
+    if (!round) {
+      socket.emit("game:error", { code: "ROUND_NOT_FOUND" });
+      return;
+    }
+
+    try {
+      const { round: finishedRound, result } = finishRound(round);
+      rounds.set(roundId, finishedRound);
+      io.to(roundId).emit("game:round-finished", result);
+    } catch (error) {
+      socket.emit("game:error", {
+        code: "ROUND_CANNOT_FINISH",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
 
   socket.on("disconnect", (reason) => {
     console.log(`[GAME] player disconnected: ${socket.id} (${reason})`);
