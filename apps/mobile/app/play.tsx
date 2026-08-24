@@ -4,7 +4,6 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-
 import {
   DEFAULT_CATEGORIES,
   createRound,
-  finishRound,
   startRound,
   submitAnswers,
   type AnswerReason,
@@ -18,6 +17,7 @@ import { validateWord } from "@game/validation";
 const GOLD = "#C9A227";
 const INK = "#151515";
 const MUTED = "#77736A";
+const GAME_SERVER_URL = process.env.EXPO_PUBLIC_GAME_SERVER_URL ?? "http://localhost:3001";
 
 const labels: Record<Category, string> = {
   human: "إنسان",
@@ -45,7 +45,9 @@ function makeRound(): GameRound {
   );
 }
 
-function mapValidationReason(reason: "empty" | "too_short" | "wrong_letter" | "category_mismatch" | "unknown_word" | "known_word" | "known_alias"): AnswerReason {
+function mapValidationReason(
+  reason: "empty" | "too_short" | "wrong_letter" | "category_mismatch" | "unknown_word" | "known_word" | "known_alias",
+): AnswerReason {
   switch (reason) {
     case "empty":
       return "empty";
@@ -59,16 +61,62 @@ function mapValidationReason(reason: "empty" | "too_short" | "wrong_letter" | "c
     case "known_alias":
       return "accepted";
     case "unknown_word":
+    default:
       return "review";
   }
 }
 
-function validateForRound(category: Category, answer: string | undefined, letter: string) {
+function localFallback(category: Category, answer: string | undefined, letter: string): ValidatedAnswer {
+  const value = answer?.trim() ?? "";
   const result = validateWord(answer, category, letter);
   return {
+    category,
+    value,
     valid: result.decision === "accept",
     reason: mapValidationReason(result.reason),
   };
+}
+
+async function validateWithServer(
+  category: Category,
+  answer: string | undefined,
+  letter: string,
+): Promise<ValidatedAnswer> {
+  const value = answer?.trim() ?? "";
+
+  if (!value) return localFallback(category, answer, letter);
+
+  try {
+    const response = await fetch(`${GAME_SERVER_URL}/validation/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value, category, letter }),
+    });
+
+    if (!response.ok) throw new Error(`Validation HTTP ${response.status}`);
+
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      result?: {
+        decision?: "accept" | "reject" | "review";
+        reason?: "empty" | "too_short" | "wrong_letter" | "category_mismatch" | "unknown_word" | "known_word" | "known_alias";
+      };
+    };
+
+    const result = payload.result;
+    if (!payload.ok || !result?.decision || !result.reason) {
+      throw new Error("Invalid validation response");
+    }
+
+    return {
+      category,
+      value,
+      valid: result.decision === "accept",
+      reason: mapValidationReason(result.reason),
+    };
+  } catch {
+    return localFallback(category, answer, letter);
+  }
 }
 
 export default function PlayScreen() {
@@ -76,6 +124,7 @@ export default function PlayScreen() {
   const [answers, setAnswers] = useState<Partial<Record<Category, string>>>({});
   const [secondsLeft, setSecondsLeft] = useState(60);
   const [playerScore, setPlayerScore] = useState<PlayerScore | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
 
   const categories = useMemo(() => round.config.categories, [round]);
   const answeredCount = Object.values(answers).filter((value) => Boolean(value?.trim())).length;
@@ -99,11 +148,13 @@ export default function PlayScreen() {
   }, [round.state]);
 
   useEffect(() => {
-    if (secondsLeft === 0 && round.state === "playing") completeRound();
+    if (secondsLeft === 0 && round.state === "playing") void completeRound();
   }, [secondsLeft, round.state]);
 
-  const completeRound = () => {
-    if (round.state !== "playing") return;
+  const completeRound = async () => {
+    if (round.state !== "playing" || isValidating) return;
+
+    setIsValidating(true);
 
     const submitted = submitAnswers(round, {
       playerId: "local-player",
@@ -111,10 +162,25 @@ export default function PlayScreen() {
       submittedAt: Date.now(),
     });
 
-    const result = finishRound(submitted, Date.now(), validateForRound);
-    setRound(result.round);
-    setPlayerScore(result.result.scores.find((entry) => entry.playerId === "local-player") ?? null);
+    const validatedAnswers = await Promise.all(
+      categories.map((category) => validateWithServer(category, submitted.submissions[submitted.submissions.length - 1]?.answers[category], round.config.letter)),
+    );
+
+    const score: PlayerScore = {
+      playerId: "local-player",
+      points: validatedAnswers.reduce((total, answer) => total + (answer.valid ? 10 : 0), 0),
+      answers: validatedAnswers,
+    };
+
+    const finishedRound: GameRound = {
+      ...submitted,
+      state: "finished",
+    };
+
+    setRound(finishedRound);
+    setPlayerScore(score);
     setSecondsLeft(0);
+    setIsValidating(false);
   };
 
   const restart = () => {
@@ -122,6 +188,7 @@ export default function PlayScreen() {
     setAnswers({});
     setSecondsLeft(60);
     setPlayerScore(null);
+    setIsValidating(false);
   };
 
   return (
@@ -210,14 +277,14 @@ export default function PlayScreen() {
                     style={styles.input}
                     textAlign="right"
                     autoCorrect={false}
-                    editable
+                    editable={!isValidating}
                   />
                 </View>
               ))}
             </View>
 
-            <Pressable style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]} onPress={completeRound}>
-              <Text style={styles.primaryText}>إنهاء الجولة وتقييم الإجابات</Text>
+            <Pressable disabled={isValidating} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed, isValidating && styles.disabledButton]} onPress={() => void completeRound()}>
+              <Text style={styles.primaryText}>{isValidating ? "جاري التحقق..." : "إنهاء الجولة وتقييم الإجابات"}</Text>
               <Text style={styles.primaryArrow}>↗</Text>
             </Pressable>
             <Text style={styles.actionHint}>المراجعة تتحقق من الحرف، طول الكلمة، والفئة، ثم تبحث في القاموس.</Text>
@@ -339,6 +406,7 @@ const styles = StyleSheet.create({
   categoryMeta: { marginTop: 3, color: "#A49B88", fontSize: 7, fontWeight: "900", letterSpacing: 1.4 },
   input: { minHeight: 50, borderRadius: 15, borderWidth: 1, borderColor: "rgba(21,21,21,0.07)", backgroundColor: "#FBFAF7", color: INK, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
   primaryButton: { marginTop: 18, minHeight: 56, borderRadius: 18, backgroundColor: GOLD, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 16, shadowColor: GOLD, shadowOffset: { width: 0, height: 9 }, shadowOpacity: 0.20, shadowRadius: 18, elevation: 5 },
+  disabledButton: { opacity: 0.6 },
   pressed: { transform: [{ scale: 0.985 }], opacity: 0.92 },
   primaryText: { color: "#FFFFFF", fontSize: 14, fontWeight: "900", letterSpacing: 0.5 },
   primaryArrow: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
