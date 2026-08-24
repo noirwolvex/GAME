@@ -153,8 +153,10 @@ export function validateWord(
     };
   }
 
+  // A local category mismatch is not final. Let the server-side hybrid
+  // validator consult Wikipedia/Groq/Wikidata and correct stale data.
   if (entries.length > 0) {
-    return { value: original, normalized, category, letter, decision: "reject", reason: "category_mismatch", confidence: 0.99 };
+    return { value: original, normalized, category, letter, decision: "review", reason: "category_mismatch", confidence: 0.5 };
   }
 
   return { value: original, normalized, category, letter, decision: "review", reason: "unknown_word", confidence: 0.5 };
