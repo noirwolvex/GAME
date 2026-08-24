@@ -1,3 +1,5 @@
+import dotenv from "dotenv";
+import { resolve } from "node:path";
 import type { Category } from "@game/game-engine";
 
 export interface GeminiValidationResult {
@@ -40,6 +42,13 @@ function cacheKey(word: string, requestedCategory: Category): string {
 }
 
 function canUseGemini(): boolean {
+  // Load the server env at request time so this module does not depend on
+  // ESM/CommonJS import ordering during `npm --workspace ... run dev`.
+  dotenv.config({
+    path: [resolve(process.cwd(), "apps/server/.env"), resolve(process.cwd(), ".env")],
+    override: true,
+  });
+
   if (!process.env.GEMINI_API_KEY) {
     console.warn("[GEMINI] skipped: GEMINI_API_KEY is missing");
     return false;
