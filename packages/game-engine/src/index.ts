@@ -26,7 +26,8 @@ export type AnswerReason =
   | "too_short"
   | "wrong_letter"
   | "wrong_category"
-  | "accepted";
+  | "accepted"
+  | "review";
 
 export interface ValidatedAnswer {
   category: Category;
