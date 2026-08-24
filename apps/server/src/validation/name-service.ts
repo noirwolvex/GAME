@@ -1,5 +1,5 @@
 import type { Category } from "@game/game-engine";
-import { validateArabicHumanNameWithGroq } from "./groq-service";
+import { validateWordWithGroq } from "./groq-service";
 
 export interface NameValidationResult {
   category: Category;
@@ -94,9 +94,9 @@ export async function validateArabicGivenName(word: string): Promise<NameValidat
   const normalized = normalizeArabic(word);
   if (!normalized) return null;
 
-  // User-requested low AI threshold for the human-name path only.
-  const groq = await validateArabicHumanNameWithGroq(word);
-  if (groq?.valid && groq.confidence >= 0.10) {
+  // Legacy human-name supplement uses the current generic Groq validator.
+  const groq = await validateWordWithGroq(word, "human");
+  if (groq?.valid && groq.category === "human" && groq.confidence >= 0.10) {
     return {
       category: "human",
       confidence: groq.confidence,
