@@ -1,0 +1,176 @@
+import type { Category } from "@game/game-engine";
+
+export type ValidationDecision = "accept" | "review" | "reject";
+
+export type ValidationReason =
+  | "empty"
+  | "too_short"
+  | "wrong_letter"
+  | "known_word"
+  | "known_alias"
+  | "category_mismatch"
+  | "unknown_word";
+
+export interface DictionaryEntry {
+  word: string;
+  category: Category;
+  aliases?: readonly string[];
+}
+
+export interface ValidationResult {
+  value: string;
+  normalized: string;
+  category: Category;
+  letter: string;
+  decision: ValidationDecision;
+  reason: ValidationReason;
+  confidence: number;
+}
+
+const MIN_ANSWER_LENGTH = 2;
+
+const SEED_DICTIONARY: readonly DictionaryEntry[] = [
+  { word: "محمد", category: "human", aliases: ["محمّد"] },
+  { word: "مريم", category: "human" },
+  { word: "ماهر", category: "human" },
+  { word: "منى", category: "human" },
+  { word: "أسد", category: "animal" },
+  { word: "ماعز", category: "animal" },
+  { word: "مها", category: "animal" },
+  { word: "موز", category: "plant" },
+  { word: "مانجو", category: "plant" },
+  { word: "مشمش", category: "plant" },
+  { word: "مفتاح", category: "object" },
+  { word: "مكتب", category: "object" },
+  { word: "منضدة", category: "object" },
+  { word: "مصر", category: "country" },
+  { word: "مالطا", category: "country" },
+  { word: "مغرب", category: "country", aliases: ["المغرب"] },
+];
+
+function stripArabicMarks(value: string): string {
+  return value.replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06EDـ]/g, "");
+}
+
+export function normalizeArabic(value: string): string {
+  return stripArabicMarks(value)
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[إأآٱ]/g, "ا")
+    .replace(/[ى]/g, "ي")
+    .replace(/[ؤ]/g, "و")
+    .replace(/[ئ]/g, "ي")
+    .replace(/\s+/g, " ");
+}
+
+export function startsWithArabicLetter(value: string, letter: string): boolean {
+  const normalizedValue = normalizeArabic(value);
+  const normalizedLetter = normalizeArabic(letter);
+  return normalizedValue.length > 0 && normalizedValue.startsWith(normalizedLetter);
+}
+
+export function createDictionary(entries: readonly DictionaryEntry[] = SEED_DICTIONARY) {
+  const exact = new Map<string, DictionaryEntry[]>();
+
+  for (const entry of entries) {
+    const values = [entry.word, ...(entry.aliases ?? [])];
+    for (const value of values) {
+      const key = normalizeArabic(value);
+      const current = exact.get(key) ?? [];
+      current.push(entry);
+      exact.set(key, current);
+    }
+  }
+
+  return exact;
+}
+
+export const DEFAULT_DICTIONARY = createDictionary();
+
+export function validateWord(
+  value: string | undefined,
+  category: Category,
+  letter: string,
+  dictionary = DEFAULT_DICTIONARY,
+): ValidationResult {
+  const original = value?.trim() ?? "";
+  const normalized = normalizeArabic(original);
+
+  if (!normalized) {
+    return {
+      value: original,
+      normalized,
+      category,
+      letter,
+      decision: "reject",
+      reason: "empty",
+      confidence: 1,
+    };
+  }
+
+  if (normalized.length < MIN_ANSWER_LENGTH) {
+    return {
+      value: original,
+      normalized,
+      category,
+      letter,
+      decision: "reject",
+      reason: "too_short",
+      confidence: 1,
+    };
+  }
+
+  if (!startsWithArabicLetter(normalized, letter)) {
+    return {
+      value: original,
+      normalized,
+      category,
+      letter,
+      decision: "reject",
+      reason: "wrong_letter",
+      confidence: 1,
+    };
+  }
+
+  const entries = dictionary.get(normalized) ?? [];
+  const matching = entries.filter((entry) => entry.category === category);
+
+  if (matching.length > 0) {
+    const exact = matching.some((entry) => normalizeArabic(entry.word) === normalized);
+    return {
+      value: original,
+      normalized,
+      category,
+      letter,
+      decision: "accept",
+      reason: exact ? "known_word" : "known_alias",
+      confidence: exact ? 1 : 0.99,
+    };
+  }
+
+  if (entries.length > 0) {
+    return {
+      value: original,
+      normalized,
+      category,
+      letter,
+      decision: "reject",
+      reason: "category_mismatch",
+      confidence: 0.99,
+    };
+  }
+
+  return {
+    value: original,
+    normalized,
+    category,
+    letter,
+    decision: "review",
+    reason: "unknown_word",
+    confidence: 0.5,
+  };
+}
+
+export function seedDictionary(): readonly DictionaryEntry[] {
+  return SEED_DICTIONARY;
+}
