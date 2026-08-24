@@ -16,3 +16,5 @@ data/arabic-wordnet/*.gz
 data/arabic-wordnet/index.json
 data/arabic-wordnet/game-index.json
 data/wikidata/*.json
+data/omw/*.tar.xz
+data/omw/*.json
