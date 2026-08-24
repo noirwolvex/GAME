@@ -170,7 +170,7 @@ export function startRound(round: GameRound, now = Date.now()): GameRound {
   };
 }
 
-const SUBMISSION_GRACE_MS = 250;
+const SUBMISSION_GRACE_MS = 1500;
 
 export function canSubmit(round: GameRound, now = Date.now()): boolean {
   return (
