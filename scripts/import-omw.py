@@ -48,11 +48,16 @@ def find_xml() -> bytes:
         return extracted.read()
 
 
+def text_of(element: ET.Element) -> str:
+    return " ".join(part.strip() for part in element.itertext() if part and part.strip())
+
+
 def build_index() -> None:
     xml_bytes = find_xml()
     root = ET.fromstring(xml_bytes)
 
     synset_ids: set[str] = set()
+    synset_meta: dict[str, dict[str, object]] = {}
     sense_to_synset: dict[str, str] = {}
     entries: dict[str, dict[str, object]] = {}
 
@@ -60,8 +65,17 @@ def build_index() -> None:
         name = local_name(element.tag)
         if name == "Synset":
             synset_id = element.attrib.get("id", "")
-            if synset_id:
-                synset_ids.add(synset_id)
+            if not synset_id:
+                continue
+            synset_ids.add(synset_id)
+            pos = element.attrib.get("partOfSpeech", "")
+            definitions: list[str] = []
+            for child in element:
+                if local_name(child.tag) == "Definition":
+                    definition = normalize(text_of(child))
+                    if definition and definition not in definitions:
+                        definitions.append(definition)
+            synset_meta[synset_id] = {"pos": pos, "definitions": definitions}
         elif name == "Sense":
             sense_id = element.attrib.get("id", "")
             synset_id = element.attrib.get("synset", "")
@@ -96,11 +110,24 @@ def build_index() -> None:
 
         item = entries.setdefault(
             word,
-            {"synsets": [], "source": "omw-arb-2.0", "confidence": 0.84},
+            {
+                "synsets": [],
+                "definitions": [],
+                "pos": [],
+                "source": "omw-arb-2.0",
+                "confidence": 0.84,
+            },
         )
         for synset_id in synsets_for_entry:
             if synset_id not in item["synsets"]:
                 item["synsets"].append(synset_id)
+            meta = synset_meta.get(synset_id, {})
+            for definition in meta.get("definitions", []):
+                if definition not in item["definitions"]:
+                    item["definitions"].append(definition)
+            pos = str(meta.get("pos", ""))
+            if pos and pos not in item["pos"]:
+                item["pos"].append(pos)
         lemma_count += 1
 
     OUTPUT.write_text(
