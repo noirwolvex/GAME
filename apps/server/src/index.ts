@@ -1,6 +1,9 @@
 import dotenv from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-dotenv.config({ path: "apps/server/.env", override: true });
+const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: resolve(__dirname, "../.env"), override: true });
 
 import cors from "cors";
 import express from "express";
