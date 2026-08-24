@@ -31,33 +31,37 @@ def load_categories(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
-    entries = payload.get("entries", {})
     result: dict[str, str] = {}
-    for word, item in entries.items():
+    for word, item in payload.get("entries", {}).items():
         if isinstance(item, dict) and item.get("category") in CATEGORIES:
             result[normalize(str(word))] = str(item["category"])
     return result
 
 
-def load_sources() -> dict[str, set[str]]:
+def load_sources() -> tuple[dict[str, set[str]], dict[str, dict[str, str]]]:
     source_map: dict[str, set[str]] = {}
-    for name, path in (
-        ("arabic-wordnet", AWN),
-        ("arabic-wordnet-expanded", AWN_EXPANDED),
-        ("omw", OMW_GAME),
-    ):
-        for word in load_categories(path):
+    category_by_source: dict[str, dict[str, str]] = {}
+    for name, path in (("arabic-wordnet", AWN), ("arabic-wordnet-expanded", AWN_EXPANDED), ("omw", OMW_GAME)):
+        categories = load_categories(path)
+        category_by_source[name] = categories
+        for word in categories:
             source_map.setdefault(word, set()).add(name)
     if ELNER.exists():
+        elner_categories: dict[str, str] = {}
         payload = json.loads(ELNER.read_text(encoding="utf-8"))
-        for item in payload.get("entries", {}).values():
+        raw_entries = payload.get("entries", {})
+        values = raw_entries.values() if isinstance(raw_entries, dict) else raw_entries
+        for item in values:
             if not isinstance(item, dict):
                 continue
             category = item.get("category_candidate")
             word = item.get("word")
             if category in CATEGORIES and word:
-                source_map.setdefault(normalize(str(word)), set()).add("elner")
-    return source_map
+                normalized = normalize(str(word))
+                elner_categories[normalized] = str(category)
+                source_map.setdefault(normalized, set()).add("elner")
+        category_by_source["elner"] = elner_categories
+    return source_map, category_by_source
 
 
 def strip_affixes(word: str) -> set[str]:
@@ -81,21 +85,30 @@ def strip_affixes(word: str) -> set[str]:
     return variants
 
 
+def consensus_category(word: str, source_map: dict[str, set[str]], category_by_source: dict[str, dict[str, str]]) -> tuple[str | None, int]:
+    categories: set[str] = set()
+    for source in source_map.get(word, set()):
+        category = category_by_source.get(source, {}).get(word)
+        if category in CATEGORIES:
+            categories.add(category)
+    if len(categories) == 1:
+        return next(iter(categories)), len(source_map.get(word, set()))
+    return None, len(categories)
+
+
 def main() -> int:
-    required = [CAMEL_DB, MASTER, AWN, OMW_GAME]
-    for path in required:
+    for path in (CAMEL_DB, MASTER, AWN, OMW_GAME):
         if not path.exists():
             raise SystemExit(f"Missing {path}")
 
     master = json.loads(MASTER.read_text(encoding="utf-8"))
     entries = dict(master.get("entries", {}))
-    source_map = load_sources()
+    source_map, category_by_source = load_sources()
 
     direct_added = 0
     direct_duplicates = 0
     conflicts = 0
     affix_candidates = 0
-    category_counts = {category: 0 for category in CATEGORIES}
 
     conn = sqlite3.connect(CAMEL_DB)
     affix_db = sqlite3.connect(AFFIX_OUT)
@@ -112,27 +125,23 @@ def main() -> int:
 
         for (raw_word,) in conn.execute(f"SELECT word FROM {table} ORDER BY rowid"):
             word = normalize(str(raw_word))
-            sources = source_map.get(word)
-            if sources:
-                categories = {load_categories(path).get(word) for path in (AWN, AWN_EXPANDED, OMW_GAME) if path.exists()}
-                categories.discard(None)
-                if word in source_map and categories:
-                    if len(categories) == 1:
-                        category = next(iter(categories))
-                        if word in entries:
-                            direct_duplicates += 1
-                        else:
-                            entries[word] = {
-                                "word": word,
-                                "category": category,
-                                "confidence": 0.93 if len(sources) >= 2 else 0.89,
-                                "sources": sorted(sources),
-                                "tier": "approved",
-                            }
-                            direct_added += 1
-                            category_counts[category] += 1
-                    else:
-                        conflicts += 1
+            category, source_count = consensus_category(word, source_map, category_by_source)
+            if category is not None:
+                if word in entries:
+                    direct_duplicates += 1
+                else:
+                    entries[word] = {
+                        "word": word,
+                        "category": category,
+                        "confidence": 0.93 if source_count >= 2 else 0.89,
+                        "sources": sorted(source_map.get(word, set())),
+                        "tier": "approved",
+                    }
+                    direct_added += 1
+                continue
+
+            if word in source_map:
+                conflicts += 1
                 continue
 
             matched = None
@@ -140,28 +149,30 @@ def main() -> int:
             for variant in strip_affixes(word):
                 if variant == word:
                     continue
-                categories = {load_categories(path).get(variant) for path in (AWN, AWN_EXPANDED, OMW_GAME) if path.exists()}
-                categories.discard(None)
-                if len(categories) == 1:
-                    matched = next(iter(categories))
+                base_category, _ = consensus_category(variant, source_map, category_by_source)
+                if base_category is not None:
+                    matched = base_category
                     matched_base = variant
                     break
             if matched:
                 affix_candidates += 1
+                sources = sorted(source_map.get(matched_base, set()))
+                confidence = 0.74 if len(sources) >= 2 else 0.70
                 affix_db.execute(
                     "INSERT OR REPLACE INTO candidates(word, base_word, category, evidence_sources, confidence) VALUES (?, ?, ?, ?, ?)",
-                    (word, matched_base, matched, ",".join(sorted(source_map.get(matched_base, {"lexical"}))), 0.70),
+                    (word, matched_base, matched, ",".join(sources), confidence),
                 )
 
         affix_db.commit()
         affix_db.execute("CREATE INDEX IF NOT EXISTS idx_category ON candidates(category)")
+        affix_db.execute("CREATE INDEX IF NOT EXISTS idx_base_word ON candidates(base_word)")
         affix_db.commit()
     finally:
         conn.close()
         affix_db.close()
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
     counts = {category: sum(1 for item in entries.values() if item.get("category") == category) for category in CATEGORIES}
+    OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(
         json.dumps(
             {
@@ -181,10 +192,10 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    print(f"Base master entries: {len(master.get('entries', {})): ,}".replace(" ", ""))
+    print(f"Base master entries: {len(master.get('entries', {})):,}")
     print(f"CAMeL direct lexical additions: {direct_added:,}")
     print(f"CAMeL direct duplicates: {direct_duplicates:,}")
-    print(f"CAMeL direct conflicts: {conflicts:,}")
+    print(f"CAMeL direct category conflicts: {conflicts:,}")
     print(f"CAMeL affix-derived candidates stored: {affix_candidates:,}")
     print(f"Combined approved index entries: {len(entries):,}")
     for category in ("human", "animal", "plant", "object", "country"):
