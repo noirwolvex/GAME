@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -13,12 +14,14 @@ OUTPUT = ROOT / "data" / "wikidata" / "game.json"
 ENDPOINT = "https://query.wikidata.org/sparql"
 USER_AGENT = "GAME-validation/0.1 (local development)"
 
+# Use direct instance-of matches for the first pass. Property-path queries
+# (P31/P279*) are substantially more expensive on the public WDQS service.
 CATEGORIES = {
     "human": ["Q5"],
     "animal": ["Q729"],
     "plant": ["Q756"],
-    "object": ["Q223557"],
-    "country": ["Q3624078", "Q6256"],
+    "object": ["Q223557", "Q39546", "Q13226383", "Q2424752", "Q16334295"],
+    "country": ["Q6256", "Q3624078"],
 }
 
 
@@ -33,12 +36,11 @@ def normalize(value: str) -> str:
 def build_query(types: list[str], limit: int, offset: int) -> str:
     values = " ".join(f"wd:{q}" for q in types)
     return f"""
-SELECT ?item ?itemLabel ?alias WHERE {{
-  ?item wdt:P31/wdt:P279* ?type .
+SELECT ?item ?itemLabel WHERE {{
+  ?item wdt:P31 ?type .
   VALUES ?type {{ {values} }}
   ?item rdfs:label ?itemLabel .
   FILTER(LANG(?itemLabel) = \"ar\")
-  OPTIONAL {{ ?item skos:altLabel ?alias . FILTER(LANG(?alias) = \"ar\") }}
 }}
 ORDER BY ?item
 LIMIT {limit}
@@ -46,35 +48,45 @@ OFFSET {offset}
 """.strip()
 
 
-def query_wikidata(query: str) -> list[dict[str, str]]:
+def query_wikidata(query: str, retries: int = 4) -> list[dict[str, str]]:
     encoded = urllib.parse.urlencode({"query": query, "format": "json"}).encode()
-    request = urllib.request.Request(
-        ENDPOINT,
-        data=encoded,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "application/sparql-results+json",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        payload = json.load(response)
-    rows: list[dict[str, str]] = []
-    for row in payload.get("results", {}).get("bindings", []):
-        rows.append({
-            "id": row.get("item", {}).get("value", "").rsplit("/", 1)[-1],
-            "word": row.get("itemLabel", {}).get("value", ""),
-            "alias": row.get("alias", {}).get("value", ""),
-        })
-    return rows
+
+    for attempt in range(retries):
+        request = urllib.request.Request(
+            ENDPOINT,
+            data=encoded,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/sparql-results+json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                payload = json.load(response)
+            return [
+                {
+                    "id": row.get("item", {}).get("value", "").rsplit("/", 1)[-1],
+                    "word": row.get("itemLabel", {}).get("value", ""),
+                }
+                for row in payload.get("results", {}).get("bindings", [])
+            ]
+        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as error:
+            if attempt == retries - 1:
+                raise
+            delay = 3.0 * (2**attempt)
+            print(f"  request failed ({error}); retrying in {delay:.0f}s...")
+            time.sleep(delay)
+
+    return []
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Import a bounded Arabic GAME subset from Wikidata")
-    parser.add_argument("--limit", type=int, default=2000)
-    parser.add_argument("--pages", type=int, default=3)
-    parser.add_argument("--sleep", type=float, default=1.5)
+    parser.add_argument("--limit", type=int, default=500)
+    parser.add_argument("--pages", type=int, default=10)
+    parser.add_argument("--sleep", type=float, default=2.0)
     args = parser.parse_args()
 
     if args.limit <= 0 or args.pages <= 0:
@@ -101,15 +113,12 @@ def main() -> int:
                     word,
                     {
                         "categories": set(),
-                        "aliases": set(),
                         "wikidata_ids": set(),
                         "source": "wikidata",
                         "confidence": 0.92,
                     },
                 )
                 entry["categories"].add(category)
-                if row["alias"]:
-                    entry["aliases"].add(normalize(row["alias"]))
                 if row["id"]:
                     entry["wikidata_ids"].add(row["id"])
 
@@ -123,7 +132,7 @@ def main() -> int:
             continue
         serializable[word] = {
             "category": categories[0],
-            "aliases": sorted(a for a in entry["aliases"] if a and a != word),
+            "aliases": [],
             "wikidata_ids": sorted(entry["wikidata_ids"]),
             "source": entry["source"],
             "confidence": entry["confidence"],
