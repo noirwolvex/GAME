@@ -29,7 +29,7 @@ const cache = new Map<string, { expiresAt: number; result: ValidationResult & { 
 const inFlight = new Map<string, Promise<ValidationResult & { sources?: string[] }>>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const EXTERNAL_TIMEOUT_MS = 3500;
-const WIKIMEDIA_USER_AGENT = "GAME-validation/0.6 (NOIR WOLVEX)";
+const WIKIMEDIA_USER_AGENT = "GAME-validation/0.7 (NOIR WOLVEX)";
 
 function cacheKey(value: string, category: Category, letter: string): string {
   return `${category}:${letter}:${value.trim()}`;
@@ -69,85 +69,28 @@ function classifyArabicDescription(description: string): Category | null {
   const text = description.toLocaleLowerCase();
 
   if (containsAny(text, [
-    "دولة",
-    "بلد",
-    "جمهورية",
-    "مملكة",
-    "إمارة",
-    "سلطنة",
-    "اتحاد دول",
-    "دولة مدينة",
-    "دولة-مدينة",
-    "مدينة دولة",
-    "مدينة-دولة",
-    "دولة ذات سيادة",
+    "دولة", "بلد", "جمهورية", "مملكة", "إمارة", "سلطنة", "اتحاد دول",
+    "دولة مدينة", "دولة-مدينة", "مدينة دولة", "مدينة-دولة", "دولة ذات سيادة",
   ])) return "country";
 
   if (containsAny(text, [
-    "شخص",
-    "إنسان",
-    "سياسي",
-    "سياسية",
-    "كاتب",
-    "كاتبة",
-    "لاعب",
-    "لاعبة",
-    "ممثل",
-    "ممثلة",
-    "مغني",
-    "مغنية",
-    "عالم",
-    "عالمة",
-    "مخترع",
-    "مخترعة",
-    "رئيس",
-    "رئيسة",
-    "ملكة",
-    "ملك",
-    "أمير",
-    "أميرة",
+    "شخص", "إنسان", "سياسي", "سياسية", "كاتب", "كاتبة", "لاعب", "لاعبة",
+    "ممثل", "ممثلة", "مغني", "مغنية", "عالم", "عالمة", "مخترع", "مخترعة",
+    "رئيس", "رئيسة", "ملكة", "ملك", "أمير", "أميرة",
   ])) return "human";
 
   if (containsAny(text, [
-    "حيوان",
-    "ثديي",
-    "ثدييات",
-    "طائر",
-    "زاحف",
-    "برمائي",
-    "سمكة",
-    "حشرة",
-    "رخوي",
-    "قشري",
-    "عنكبي",
+    "حيوان", "ثديي", "ثدييات", "طائر", "زاحف", "برمائي", "سمكة", "حشرة",
+    "رخوي", "قشري", "عنكبي",
   ])) return "animal";
 
   if (containsAny(text, [
-    "نبات",
-    "شجرة",
-    "شجيرة",
-    "زهرة",
-    "عشبة",
-    "عشب",
-    "نخلة",
-    "كرمة",
+    "نبات", "شجرة", "شجيرة", "زهرة", "عشبة", "عشب", "نخلة", "كرمة",
   ])) return "plant";
 
   if (containsAny(text, [
-    "أداة",
-    "جهاز",
-    "آلة",
-    "مركبة",
-    "سيارة",
-    "مبنى",
-    "منتج",
-    "قطعة",
-    "مادة",
-    "شيء",
-    "جسم",
-    "أثاث",
-    "ملابس",
-    "كتاب",
+    "أداة", "جهاز", "آلة", "مركبة", "سيارة", "مبنى", "منتج", "قطعة", "مادة",
+    "شيء", "جسم", "أثاث", "ملابس", "كتاب",
   ])) return "object";
 
   return null;
@@ -207,18 +150,13 @@ async function queryWikidata(word: string): Promise<ExternalEvidence | null> {
   searchUrl.searchParams.set("limit", "10");
 
   const searchPayload = (await fetchJson(searchUrl.toString())) as {
-    search?: Array<{
-      id?: string;
-      label?: string;
-      description?: string;
-    }>;
+    search?: Array<{ id?: string; label?: string; description?: string }>;
   } | null;
 
   const candidates = (searchPayload?.search ?? []).filter((item) => item.id);
   if (candidates.length === 0) return null;
 
   const candidateIds = candidates.map((item) => item.id).filter((id): id is string => Boolean(id));
-
   const entityUrl = new URL("https://www.wikidata.org/w/api.php");
   entityUrl.searchParams.set("action", "wbgetentities");
   entityUrl.searchParams.set("format", "json");
@@ -237,7 +175,6 @@ async function queryWikidata(word: string): Promise<ExternalEvidence | null> {
   } | null;
 
   const entities = entityPayload?.entities ?? {};
-
   let best: ExternalEvidence | null = null;
 
   for (const candidate of candidates) {
@@ -250,12 +187,10 @@ async function queryWikidata(word: string): Promise<ExternalEvidence | null> {
     const aliases = (entity.aliases?.ar ?? [])
       .map((alias) => alias.value ?? "")
       .filter(Boolean);
-
     const exactLabel = normalizeLookup(label) === normalizedWord;
     const exactAlias = aliases.some((alias) => normalizeLookup(alias) === normalizedWord);
     const exact = exactLabel || exactAlias;
-
-    if (!exact && normalizeLookup(candidate.label ?? "") !== normalizedWord) continue;
+    if (!exact) continue;
 
     const p31Ids = getEntityIds(entity.claims, "P31");
     const p279Ids = getEntityIds(entity.claims, "P279");
@@ -270,32 +205,21 @@ async function queryWikidata(word: string): Promise<ExternalEvidence | null> {
       entity.descriptions?.en?.value ??
       candidate.description ??
       "";
-
     const descriptionCategory = classifyArabicDescription(description);
-
-    let category = directCategory ?? descriptionCategory;
+    const category = directCategory ?? descriptionCategory;
     if (!category) continue;
 
     const confidence = directCategory
-      ? exact && descriptionCategory === directCategory
-        ? 0.99
-        : exact
-          ? 0.95
-          : 0.90
-      : exact && descriptionCategory
-        ? 0.86
-        : 0.78;
+      ? descriptionCategory === directCategory ? 0.99 : 0.95
+      : 0.86;
 
     const evidence: ExternalEvidence = {
       category,
       confidence,
       source: directCategory ? "wikidata-entity" : "wikidata-description",
-      exact,
+      exact: true,
     };
-
-    if (!best || evidence.confidence > best.confidence) {
-      best = evidence;
-    }
+    if (!best || evidence.confidence > best.confidence) best = evidence;
   }
 
   return best;
@@ -310,28 +234,22 @@ async function queryWikipedia(word: string): Promise<ExternalEvidence | null> {
   searchUrl.searchParams.set("limit", "10");
 
   const searchPayload = (await fetchJson(searchUrl.toString())) as {
-    pages?: Array<{
-      title?: string;
-      description?: string;
-      matched_title?: string | null;
-    }>;
+    pages?: Array<{ title?: string; description?: string }>;
   } | null;
 
   const pages = searchPayload?.pages ?? [];
   const best = pages.find((page) => normalizeLookup(page.title ?? "") === normalizedWord);
   if (!best?.title) return null;
 
-  const title = best.title;
-  const summaryUrl = `https://ar.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+  const summaryUrl = `https://ar.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(best.title)}`;
   const summaryPayload = (await fetchJson(summaryUrl)) as {
     title?: string;
     description?: string | null;
     extract?: string | null;
   } | null;
 
-  const description = summaryPayload?.description ?? best.description ?? "";
-  const extract = summaryPayload?.extract ?? "";
-  const category = classifyArabicDescription(`${description}\n${extract}`);
+  const description = `${summaryPayload?.description ?? best.description ?? ""}\n${summaryPayload?.extract ?? ""}`;
+  const category = classifyArabicDescription(description);
   if (!category) return null;
 
   return {
@@ -351,21 +269,19 @@ async function resolveExternal(value: string, requestedCategory: Category): Prom
   const evidence = [wikidata, wikipedia].filter(
     (item): item is ExternalEvidence => Boolean(item),
   );
-
   const matching = evidence.filter((item) => item.category === requestedCategory);
-  const exactMatching = matching.filter((item) => item.exact);
 
-  if (matching.length >= 2 && exactMatching.length >= 1) {
+  if (matching.length >= 2) {
     return {
       category: requestedCategory,
-      confidence: 0.99,
+      confidence: Math.min(0.99, Math.max(...matching.map((item) => item.confidence)) + 0.01),
       reason: "known_word",
       sources: matching.map((item) => item.source),
     };
   }
 
   const strongest = matching.sort((a, b) => b.confidence - a.confidence)[0];
-  if (strongest && strongest.exact && strongest.confidence >= 0.90) {
+  if (strongest?.exact && strongest.confidence >= 0.90) {
     return {
       category: requestedCategory,
       confidence: strongest.confidence,
@@ -379,7 +295,6 @@ async function resolveExternal(value: string, requestedCategory: Category): Prom
 
 async function validateExternally(local: ValidationResult): Promise<ValidationResult & { sources?: string[] }> {
   if (!local.normalized) return local;
-
   const external = await resolveExternal(local.normalized, local.category);
   if (!external) return local;
 
@@ -399,7 +314,6 @@ export async function validateWithHybridSources(
 ): Promise<ValidationResult & { sources?: string[] }> {
   const local = validateWord(value, category, letter);
   const key = cacheKey(local.normalized, category, letter);
-
   const cached = getCached(key);
   if (cached) return cached;
 
