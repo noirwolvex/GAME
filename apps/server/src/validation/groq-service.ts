@@ -37,13 +37,20 @@ function todayKey(): string {
 }
 
 function canUseGroq(): boolean {
-  if (!process.env.GROQ_API_KEY) return false;
+  if (!process.env.GROQ_API_KEY) {
+    console.warn("[GROQ] skipped: GROQ_API_KEY is missing");
+    return false;
+  }
   const today = todayKey();
   if (usageDay !== today) {
     usageDay = today;
     usageCount = 0;
   }
-  return usageCount < LOCAL_DAILY_CAP;
+  if (usageCount >= LOCAL_DAILY_CAP) {
+    console.warn(`[GROQ] skipped: local daily cap reached (${LOCAL_DAILY_CAP})`);
+    return false;
+  }
+  return true;
 }
 
 function cacheKey(word: string, requestedCategory: Category): string {
@@ -57,6 +64,7 @@ function getCached(word: string, requestedCategory: Category): GroqValidationRes
     cache.delete(cacheKey(word, requestedCategory));
     return null;
   }
+  console.info(`[GROQ] cache hit: ${requestedCategory}:${normalize(word)}`);
   return hit.result;
 }
 
@@ -69,13 +77,18 @@ function setCached(word: string, requestedCategory: Category, result: GroqValida
 
 export async function validateWordWithGroq(word: string, requestedCategory: Category): Promise<GroqValidationResult | null> {
   const normalized = normalize(word);
-  if (!normalized) return null;
+  if (!normalized) {
+    console.warn("[GROQ] skipped: empty normalized word");
+    return null;
+  }
 
   const cached = getCached(normalized, requestedCategory);
   if (cached) return cached;
   if (!canUseGroq()) return null;
 
   usageCount += 1;
+  console.info(`[GROQ] request #${usageCount}: category=${requestedCategory} word=${normalized} model=${GROQ_MODEL}`);
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS);
 
@@ -123,13 +136,26 @@ export async function validateWordWithGroq(word: string, requestedCategory: Cate
       }),
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const retryAfter = response.headers.get("retry-after");
+      const requestId = response.headers.get("x-request-id");
+      console.error(
+        `[GROQ] HTTP ${response.status} ${response.statusText || ""}`.trim(),
+        JSON.stringify({ retryAfter, requestId }),
+      );
+      return null;
+    }
+
+    console.info(`[GROQ] HTTP ${response.status} OK`);
 
     const payload = (await response.json()) as {
       choices?: Array<{ message?: { content?: string | null } }>;
     };
     const content = payload.choices?.[0]?.message?.content;
-    if (!content) return null;
+    if (!content) {
+      console.error("[GROQ] invalid response: missing choices[0].message.content");
+      return null;
+    }
 
     const parsed = JSON.parse(content) as {
       valid?: boolean;
@@ -143,7 +169,10 @@ export async function validateWordWithGroq(word: string, requestedCategory: Cate
       !parsed.category ||
       !CATEGORIES.includes(parsed.category) ||
       typeof parsed.confidence !== "number"
-    ) return null;
+    ) {
+      console.error("[GROQ] invalid response schema");
+      return null;
+    }
 
     const result: GroqValidationResult = {
       valid: parsed.valid,
@@ -152,9 +181,17 @@ export async function validateWordWithGroq(word: string, requestedCategory: Cate
       reason: parsed.reason?.trim() || "ai_validation",
       source: "groq-ai",
     };
+    console.info(
+      `[GROQ] result: valid=${result.valid} category=${result.category} confidence=${result.confidence} reason=${result.reason}`,
+    );
     setCached(normalized, requestedCategory, result);
     return result;
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      console.error(`[GROQ] timeout after ${GROQ_TIMEOUT_MS}ms`);
+    } else {
+      console.error("[GROQ] request failed:", error instanceof Error ? error.message : String(error));
+    }
     return null;
   } finally {
     clearTimeout(timeout);
