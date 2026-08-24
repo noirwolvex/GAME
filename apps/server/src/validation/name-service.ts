@@ -1,4 +1,5 @@
 import type { Category } from "@game/game-engine";
+import { validateArabicHumanNameWithGroq } from "./groq-service";
 
 export interface NameValidationResult {
   category: Category;
@@ -82,7 +83,7 @@ async function fetchSearchPage(word: string): Promise<string> {
   url.searchParams.set("namespace", "0");
 
   const payload = await fetchJson(url.toString());
-  const titles = Array.isArray(payload?.[1]) ? payload[1] as string[] : [];
+  const titles = Array.isArray(payload?.[1]) ? (payload[1] as string[]) : [];
   const normalized = normalizeArabic(word);
   const exactTitle = titles.find((title) => normalizeArabic(title) === normalized);
   if (!exactTitle) return "";
@@ -96,11 +97,22 @@ export async function validateArabicGivenName(word: string): Promise<NameValidat
   const directExtract = await fetchExactPage(word);
   const extract = directExtract || await fetchSearchPage(word);
 
-  if (!extract || !hasNameSignal(extract)) return null;
+  if (extract && hasNameSignal(extract)) {
+    return {
+      category: "human",
+      confidence: 0.95,
+      source: "wiktionary-name",
+    };
+  }
 
-  return {
-    category: "human",
-    confidence: 0.95,
-    source: "wiktionary-name",
-  };
+  const groq = await validateArabicHumanNameWithGroq(word);
+  if (groq?.valid && groq.confidence >= 0.90) {
+    return {
+      category: "human",
+      confidence: groq.confidence,
+      source: groq.source,
+    };
+  }
+
+  return null;
 }
