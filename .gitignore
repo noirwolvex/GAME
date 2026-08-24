@@ -10,3 +10,7 @@ web-build/
 coverage/
 .DS_Store
 *.log
+
+# Local validation source data and generated indexes
+data/arabic-wordnet/*.gz
+data/arabic-wordnet/index.json
