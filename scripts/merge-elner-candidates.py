@@ -30,17 +30,26 @@ def main() -> int:
     entries = dict(master.get("entries", {}))
     payload = json.loads(ELNER.read_text(encoding="utf-8"))
 
-    candidates = payload.get("safe_candidates", payload.get("entries", []))
+    raw_entries = payload.get("entries", {})
+    candidates = []
+    if isinstance(raw_entries, dict):
+        candidates = list(raw_entries.values())
+    elif isinstance(raw_entries, list):
+        candidates = raw_entries
+
     added = 0
     duplicates = 0
     conflicts = 0
     counts = {category: 0 for category in CATEGORIES}
 
     for item in candidates:
-        word = item.get("word") if isinstance(item, dict) else None
-        category = item.get("category") if isinstance(item, dict) else None
-        if not word or category not in CATEGORIES:
+        if not isinstance(item, dict):
             continue
+        category = item.get("category_candidate")
+        word = item.get("word")
+        if category not in CATEGORIES or not word:
+            continue
+
         normalized = normalize(str(word))
         if not normalized:
             continue
@@ -51,7 +60,10 @@ def main() -> int:
                 sources = existing.setdefault("sources", [])
                 if "elner-dz" not in sources:
                     sources.append("elner-dz")
-                existing["confidence"] = min(0.99, max(float(existing.get("confidence", 0.8)), 0.78) + 0.02)
+                existing["confidence"] = min(
+                    0.99,
+                    max(float(existing.get("confidence", 0.8)), 0.78) + 0.02,
+                )
                 duplicates += 1
             else:
                 conflicts += 1
@@ -60,9 +72,10 @@ def main() -> int:
         entries[normalized] = {
             "word": normalized,
             "category": category,
-            "confidence": float(item.get("confidence", 0.78)),
+            "confidence": 0.78,
             "sources": ["elner-dz"],
             "tier": "linked-candidate",
+            "wikidata_id": item.get("wikidata_id"),
         }
         added += 1
         counts[category] += 1
