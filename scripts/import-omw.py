@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import gzip
 import json
 import re
 import tarfile
@@ -13,6 +12,10 @@ DATA_DIR = ROOT / "data" / "omw"
 ARCHIVE = DATA_DIR / "omw-arb-2.0.tar.xz"
 OUTPUT = DATA_DIR / "arabic.json"
 URL = "https://github.com/omwn/omw-data/releases/download/v2.0/omw-arb-2.0.tar.xz"
+
+
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def normalize(value: str) -> str:
@@ -47,25 +50,58 @@ def find_xml() -> bytes:
 
 def build_index() -> None:
     xml_bytes = find_xml()
-    entries: dict[str, dict[str, object]] = {}
-    synsets = 0
-
     root = ET.fromstring(xml_bytes)
-    for synset in root.iter():
-        if not synset.tag.endswith("Synset"):
+
+    synset_ids: set[str] = set()
+    sense_to_synset: dict[str, str] = {}
+    entries: dict[str, dict[str, object]] = {}
+
+    for element in root.iter():
+        name = local_name(element.tag)
+        if name == "Synset":
+            synset_id = element.attrib.get("id", "")
+            if synset_id:
+                synset_ids.add(synset_id)
+        elif name == "Sense":
+            sense_id = element.attrib.get("id", "")
+            synset_id = element.attrib.get("synset", "")
+            if sense_id and synset_id:
+                sense_to_synset[sense_id] = synset_id
+
+    lexical_entries = 0
+    lemma_count = 0
+
+    for lexical_entry in root.iter():
+        if local_name(lexical_entry.tag) != "LexicalEntry":
             continue
-        synsets += 1
-        synset_id = synset.attrib.get("id", "")
-        for child in synset.iter():
-            if not child.tag.endswith("Lemma"):
+        lexical_entries += 1
+
+        lemma = next((child for child in lexical_entry if local_name(child.tag) == "Lemma"), None)
+        if lemma is None:
+            continue
+
+        written = lemma.attrib.get("writtenForm", "") or (lemma.text or "")
+        word = normalize(written)
+        if len(word) < 2:
+            continue
+
+        synsets_for_entry: list[str] = []
+        for child in lexical_entry:
+            if local_name(child.tag) != "Sense":
                 continue
-            written = child.attrib.get("writtenForm", "") or (child.text or "")
-            word = normalize(written)
-            if len(word) < 2:
-                continue
-            item = entries.setdefault(word, {"synsets": [], "source": "omw-arb-2.0", "confidence": 0.84})
-            if synset_id and synset_id not in item["synsets"]:
+            sense_id = child.attrib.get("id", "")
+            synset_id = child.attrib.get("synset", "") or sense_to_synset.get(sense_id, "")
+            if synset_id and synset_id not in synsets_for_entry:
+                synsets_for_entry.append(synset_id)
+
+        item = entries.setdefault(
+            word,
+            {"synsets": [], "source": "omw-arb-2.0", "confidence": 0.84},
+        )
+        for synset_id in synsets_for_entry:
+            if synset_id not in item["synsets"]:
                 item["synsets"].append(synset_id)
+        lemma_count += 1
 
     OUTPUT.write_text(
         json.dumps(
@@ -74,7 +110,9 @@ def build_index() -> None:
                 "source_url": "https://github.com/omwn/omw-data/releases/tag/v2.0",
                 "license": "Consult individual wordnet license; Arabic WordNet is CC BY-SA 3.0",
                 "language": "arb",
-                "synsets": synsets,
+                "synsets": len(synset_ids),
+                "lexical_entries": lexical_entries,
+                "lemma_occurrences": lemma_count,
                 "words": len(entries),
                 "entries": entries,
             },
@@ -83,7 +121,10 @@ def build_index() -> None:
         ),
         encoding="utf-8",
     )
-    print(f"Indexed {len(entries):,} Arabic OMW lemmas from {synsets:,} synsets")
+    print(
+        f"Indexed {len(entries):,} Arabic OMW lemmas from {len(synset_ids):,} synsets"
+    )
+    print(f"Lexical entries: {lexical_entries:,}; lemma occurrences: {lemma_count:,}")
     print(f"Done: {OUTPUT}")
 
 
