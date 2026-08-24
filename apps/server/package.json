@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts"
+    "dev": "tsx watch src/start.ts",
+    "start": "tsx src/start.ts"
   },
   "dependencies": {
     "@game/game-engine": "file:../../packages/game-engine",
