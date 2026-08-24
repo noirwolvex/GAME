@@ -18,8 +18,8 @@ type ExternalDecision = {
   sources: string[];
 };
 
-const cache = new Map<string, { expiresAt: number; result: ValidationResult }>();
-const inFlight = new Map<string, Promise<ValidationResult>>();
+const cache = new Map<string, { expiresAt: number; result: ValidationResult & { sources?: string[] } }>();
+const inFlight = new Map<string, Promise<ValidationResult & { sources?: string[] }>>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const EXTERNAL_TIMEOUT_MS = 3500;
 const WIKIMEDIA_USER_AGENT = "GAME-validation/0.5 (NOIR WOLVEX)";
@@ -28,7 +28,7 @@ function cacheKey(value: string, category: Category, letter: string): string {
   return `${category}:${letter}:${value.trim()}`;
 }
 
-function getCached(key: string): ValidationResult | null {
+function getCached(key: string): (ValidationResult & { sources?: string[] }) | null {
   const hit = cache.get(key);
   if (!hit) return null;
   if (hit.expiresAt < Date.now()) {
@@ -38,7 +38,7 @@ function getCached(key: string): ValidationResult | null {
   return hit.result;
 }
 
-function setCached(key: string, result: ValidationResult): void {
+function setCached(key: string, result: ValidationResult & { sources?: string[] }): void {
   cache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, result });
 }
 
@@ -48,83 +48,11 @@ function containsAny(text: string, terms: readonly string[]): boolean {
 
 function classifyArabicDescription(description: string): Category | null {
   const text = description.toLocaleLowerCase();
-
-  if (containsAny(text, [
-    "دولة",
-    "بلد",
-    "جمهورية",
-    "مملكة",
-    "إمارة",
-    "سلطنة",
-    "اتحاد دول",
-  ])) return "country";
-
-  if (containsAny(text, [
-    "شخص",
-    "سياسي",
-    "سياسية",
-    "كاتب",
-    "كاتبة",
-    "لاعب",
-    "لاعبة",
-    "ممثل",
-    "ممثلة",
-    "مغني",
-    "مغنية",
-    "عالم",
-    "عالمة",
-    "مخترع",
-    "مخترعة",
-    "رئيس",
-    "ملكة",
-    "ملك",
-    "أمير",
-    "أميرة",
-  ])) return "human";
-
-  if (containsAny(text, [
-    "حيوان",
-    "ثديي",
-    "ثدييات",
-    "طائر",
-    "زاحف",
-    "برمائي",
-    "سمكة",
-    "حشرة",
-    "رخوي",
-    "قشري",
-    "عنكبي",
-  ])) return "animal";
-
-  if (containsAny(text, [
-    "نبات",
-    "شجرة",
-    "شجيرة",
-    "زهرة",
-    "عشبة",
-    "عشب",
-    "نخلة",
-    "كرمة",
-  ])) return "plant";
-
-  if (containsAny(text, [
-    "أداة",
-    "جهاز",
-    "آلة",
-    "مركبة",
-    "سيارة",
-    "سلاح",
-    "مبنى",
-    "منتج",
-    "قطعة",
-    "مادة",
-    "شيء",
-    "جسم",
-    "أثاث",
-    "ملابس",
-    "كتاب",
-  ])) return "object";
-
+  if (containsAny(text, ["دولة", "بلد", "جمهورية", "مملكة", "إمارة", "سلطنة", "اتحاد دول"])) return "country";
+  if (containsAny(text, ["شخص", "سياسي", "سياسية", "كاتب", "كاتبة", "لاعب", "لاعبة", "ممثل", "ممثلة", "مغني", "مغنية", "عالم", "عالمة", "مخترع", "مخترعة", "رئيس", "ملكة", "ملك", "أمير", "أميرة"])) return "human";
+  if (containsAny(text, ["حيوان", "ثديي", "ثدييات", "طائر", "زاحف", "برمائي", "سمكة", "حشرة", "رخوي", "قشري", "عنكبي"])) return "animal";
+  if (containsAny(text, ["نبات", "شجرة", "شجيرة", "زهرة", "عشبة", "عشب", "نخلة", "كرمة"])) return "plant";
+  if (containsAny(text, ["أداة", "جهاز", "آلة", "مركبة", "سيارة", "مبنى", "منتج", "قطعة", "مادة", "شيء", "جسم", "أثاث", "ملابس", "كتاب"])) return "object";
   return null;
 }
 
@@ -134,10 +62,7 @@ async function fetchJson(url: string): Promise<unknown | null> {
   try {
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-        "User-Agent": WIKIMEDIA_USER_AGENT,
-      },
+      headers: { Accept: "application/json", "User-Agent": WIKIMEDIA_USER_AGENT },
     });
     if (!response.ok) return null;
     return await response.json();
@@ -148,11 +73,7 @@ async function fetchJson(url: string): Promise<unknown | null> {
   }
 }
 
-async function queryWikidata(word: string): Promise<{
-  category: Category;
-  confidence: number;
-  source: string;
-} | null> {
+async function queryWikidata(word: string): Promise<{ category: Category; confidence: number; source: string } | null> {
   const searchUrl = new URL("https://www.wikidata.org/w/api.php");
   searchUrl.searchParams.set("action", "wbsearchentities");
   searchUrl.searchParams.set("format", "json");
@@ -161,10 +82,7 @@ async function queryWikidata(word: string): Promise<{
   searchUrl.searchParams.set("search", word);
   searchUrl.searchParams.set("limit", "3");
 
-  const searchPayload = (await fetchJson(searchUrl.toString())) as {
-    search?: Array<{ id?: string; label?: string; description?: string }>;
-  } | null;
-
+  const searchPayload = (await fetchJson(searchUrl.toString())) as { search?: Array<{ id?: string; label?: string; description?: string }> } | null;
   const first = searchPayload?.search?.find((item) => item.id && item.label);
   if (!first?.id) return null;
 
@@ -179,20 +97,13 @@ async function queryWikidata(word: string): Promise<{
     entities?: Record<string, {
       claims?: Record<string, Array<{ mainsnak?: { datavalue?: { value?: { id?: string } } } }>>;
       descriptions?: Record<string, { value?: string }>;
-      labels?: Record<string, { value?: string }>;
     }>;
   } | null;
-
   const entity = entityPayload?.entities?.[first.id];
   if (!entity) return null;
 
   const p31 = entity.claims?.P31 ?? [];
-  const instanceIds = new Set(
-    p31
-      .map((claim) => claim.mainsnak?.datavalue?.value?.id)
-      .filter((id): id is string => Boolean(id)),
-  );
-
+  const instanceIds = new Set(p31.map((claim) => claim.mainsnak?.datavalue?.value?.id).filter((id): id is string => Boolean(id)));
   const directMap: ReadonlyMap<string, Category> = new Map([
     ["Q5", "human"],
     ["Q729", "animal"],
@@ -201,127 +112,54 @@ async function queryWikidata(word: string): Promise<{
     ["Q223557", "object"],
   ]);
 
-  const directCategory = [...instanceIds]
-    .map((id) => directMap.get(id) ?? null)
-    .find((category): category is Category => category !== null);
-
-  const description =
-    entity.descriptions?.ar?.value ??
-    entity.descriptions?.en?.value ??
-    first.description ??
-    "";
-
+  const directCategory = [...instanceIds].map((id) => directMap.get(id) ?? null).find((category): category is Category => category !== null);
+  const description = entity.descriptions?.ar?.value ?? entity.descriptions?.en?.value ?? first.description ?? "";
   const descriptionCategory = classifyArabicDescription(description);
 
   if (directCategory) {
-    return {
-      category: directCategory,
-      confidence: descriptionCategory === directCategory ? 0.97 : 0.92,
-      source: "wikidata",
-    };
+    return { category: directCategory, confidence: descriptionCategory === directCategory ? 0.97 : 0.92, source: "wikidata" };
   }
-
-  if (descriptionCategory) {
-    return {
-      category: descriptionCategory,
-      confidence: 0.82,
-      source: "wikidata-description",
-    };
-  }
-
+  if (descriptionCategory) return { category: descriptionCategory, confidence: 0.82, source: "wikidata-description" };
   return null;
 }
 
-async function queryWikipedia(word: string): Promise<{
-  category: Category;
-  confidence: number;
-  source: string;
-} | null> {
+async function queryWikipedia(word: string): Promise<{ category: Category; confidence: number; source: string } | null> {
   const searchUrl = new URL("https://ar.wikipedia.org/w/rest.php/v1/search/page");
   searchUrl.searchParams.set("q", word);
   searchUrl.searchParams.set("limit", "3");
-
-  const searchPayload = (await fetchJson(searchUrl.toString())) as {
-    pages?: Array<{ title?: string; description?: string }>;
-  } | null;
-
+  const searchPayload = (await fetchJson(searchUrl.toString())) as { pages?: Array<{ title?: string; description?: string }> } | null;
   const normalizedWord = word.trim().toLocaleLowerCase();
-  const best = searchPayload?.pages?.find(
-    (page) => page.title?.trim().toLocaleLowerCase() === normalizedWord,
-  ) ?? searchPayload?.pages?.[0];
-
+  const best = searchPayload?.pages?.find((page) => page.title?.trim().toLocaleLowerCase() === normalizedWord) ?? searchPayload?.pages?.[0];
   if (!best) return null;
-  const description = best.description ?? "";
-  const category = classifyArabicDescription(description);
-  if (!category) return null;
 
-  return {
-    category,
-    confidence: 0.80,
-    source: "wikipedia",
-  };
+  const category = classifyArabicDescription(best.description ?? "");
+  if (!category) return null;
+  return { category, confidence: 0.80, source: "wikipedia" };
 }
 
-async function resolveExternal(
-  value: string,
-  requestedCategory: Category,
-): Promise<ExternalDecision | null> {
-  const [wikidata, wikipedia] = await Promise.all([
-    queryWikidata(value),
-    queryWikipedia(value),
-  ]);
-
-  const agreeing = [wikidata, wikipedia].filter(
-    (item): item is NonNullable<typeof item> => Boolean(item && item.category === requestedCategory),
-  );
+async function resolveExternal(value: string, requestedCategory: Category): Promise<ExternalDecision | null> {
+  const [wikidata, wikipedia] = await Promise.all([queryWikidata(value), queryWikipedia(value)]);
+  const evidence = [wikidata, wikipedia].filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const agreeing = evidence.filter((item) => item.category === requestedCategory);
 
   if (agreeing.length >= 2) {
-    return {
-      category: requestedCategory,
-      confidence: 0.95,
-      reason: "known_word",
-      sources: agreeing.map((item) => item.source),
-    };
+    return { category: requestedCategory, confidence: 0.95, reason: "known_word", sources: agreeing.map((item) => item.source) };
   }
-
   const single = agreeing[0];
-  if (single) {
-    return {
-      category: requestedCategory,
-      confidence: single.confidence,
-      reason: "known_word",
-      sources: [single.source],
-    };
-  }
-
+  if (single) return { category: requestedCategory, confidence: single.confidence, reason: "known_word", sources: [single.source] };
   return null;
 }
 
-async function validateExternally(
-  value: string | undefined,
-  local: ValidationResult,
-): Promise<ValidationResult> {
+async function validateExternally(local: ValidationResult): Promise<ValidationResult & { sources?: string[] }> {
   if (!local.normalized) return local;
-
   const external = await resolveExternal(local.normalized, local.category);
   if (!external) return local;
-
-  return {
-    ...local,
-    decision: "accept",
-    reason: external.reason,
-    confidence: external.confidence,
-  };
+  return { ...local, decision: "accept", reason: external.reason, confidence: external.confidence, sources: external.sources };
 }
 
-export async function validateWithHybridSources(
-  value: string | undefined,
-  category: Category,
-  letter: string,
-): Promise<ValidationResult> {
+export async function validateWithHybridSources(value: string | undefined, category: Category, letter: string): Promise<ValidationResult & { sources?: string[] }> {
   const local = validateWord(value, category, letter);
   const key = cacheKey(local.normalized, category, letter);
-
   const cached = getCached(key);
   if (cached) return cached;
 
@@ -335,15 +173,13 @@ export async function validateWithHybridSources(
 
   const task = (async () => {
     try {
-      const externalResult = await validateExternally(value, local);
-
+      const externalResult = await validateExternally(local);
       const supabaseUrl = process.env.SUPABASE_URL;
       const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-      // Optional persistent cache: only cache externally verified answers.
       if (externalResult.decision === "accept" && supabaseUrl && serviceRoleKey) {
         try {
-          const response = await fetch(`${supabaseUrl}/rest/v1/validation_words`, {
+          await fetch(`${supabaseUrl}/rest/v1/validation_words`, {
             method: "POST",
             headers: {
               apikey: serviceRoleKey,
@@ -358,12 +194,11 @@ export async function validateWithHybridSources(
               aliases: [],
               status: "accepted",
               confidence: externalResult.confidence,
-              source: "wikidata+wikipedia",
+              source: externalResult.sources?.join("+") ?? "external",
             }),
           });
-          void response;
         } catch {
-          // In-memory validation remains authoritative for this request.
+          // In-memory result remains authoritative for this request.
         }
       }
 
