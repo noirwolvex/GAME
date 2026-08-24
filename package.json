@@ -19,6 +19,7 @@
     "validation:omw:classify": "python scripts/classify-omw.py",
     "validation:merge": "python scripts/merge-validation-sources.py",
     "validation:wordlist": "python scripts/import-arabic-wordlist.py",
-    "validation:elner": "python scripts/import-elner-candidates.py"
+    "validation:elner": "python scripts/import-elner-candidates.py",
+    "validation:merge-elner": "python scripts/merge-elner-candidates.py"
   }
 }
