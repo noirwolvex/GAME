@@ -44,6 +44,7 @@ const SEED_DICTIONARY: readonly DictionaryEntry[] = [
   { word: "قاسم", category: "human" },
   { word: "زهراء", category: "human" },
   { word: "يحيى", category: "human" },
+  { word: "تامر", category: "human" },
   { word: "أسد", category: "animal" },
   { word: "ماعز", category: "animal" },
   { word: "مها", category: "animal" },
