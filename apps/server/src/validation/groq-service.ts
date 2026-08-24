@@ -92,11 +92,11 @@ export async function validateArabicHumanNameWithGroq(word: string): Promise<Gro
           {
             role: "system",
             content:
-              "You validate Arabic GAME answers. Decide whether the supplied Arabic word is plausibly a human given name/name of a person. Do not invent facts. Return strict JSON only.",
+              "You are a strict but practical validator for an Arabic word game. Determine whether the supplied Arabic word is a reasonably established human given name or personal name in Arabic usage. Common names must be accepted even if there is no Wikipedia/Wiktionary page for a specific person. Examples that should normally be valid include: حيدر، مرام، ضحى، قاسم، زهراء، محمد، فاطمة، علي. Reject ordinary non-name vocabulary such as colors, objects, animals, plants, places, countries, verbs, adjectives, and arbitrary strings. Do not invent evidence. Return strict JSON only with valid, confidence, and reason.",
           },
           {
             role: "user",
-            content: `Word: ${word}\nQuestion: Can this Arabic word reasonably be accepted as a human given name in a word game?`,
+            content: `Arabic word: ${word}\nIs this reasonably usable as a human name in a word game? If it is a common or recognized personal name, set valid=true and confidence at least 0.80.`,
           },
         ],
         response_format: {
