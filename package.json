@@ -1,0 +1,14 @@
+{
+  "name": "game",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "mobile": "npm --workspace @game/mobile start",
+    "web": "npm --workspace @game/mobile run web",
+    "server": "npm --workspace @game/server run dev"
+  }
+}
