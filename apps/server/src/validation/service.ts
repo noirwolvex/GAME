@@ -2,6 +2,7 @@ import { validateWord, type ValidationResult } from "@game/validation";
 import type { Category } from "@game/game-engine";
 import { validateArabicGivenName } from "./name-service";
 import { validateWordWithGroq } from "./groq-service";
+import { validateWordWithGemini } from "./gemini-service";
 
 interface SupabaseRow {
   word: string;
@@ -242,7 +243,7 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
 
   // Wikipedia is the first external source. A category conflict is only evidence,
   // not a final rejection, because Wikipedia's lightweight Arabic classifier can be wrong.
-  const wikipedia = await queryWikipedia(local.normalized);
+  const wikipedia = await queryWikipedia(local.value);
   if (wikipedia && wikipedia.category === local.category && wikipedia.confidence >= 0.80) {
     return {
       ...local,
@@ -254,7 +255,7 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
   }
 
   // Any Wikipedia mismatch or unknown result proceeds to Groq.
-  const groq = await validateWordWithGroq(local.normalized, local.category);
+  const groq = await validateWordWithGroq(local.value, local.category);
   if (groq) {
     if (groq.valid && groq.category === local.category && groq.confidence >= 0.10) {
       return {
@@ -277,7 +278,7 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
   }
 
   // Wikidata is the tertiary fallback after Wikipedia and Groq.
-  const wikidata = await queryWikidata(local.normalized);
+  const wikidata = await queryWikidata(local.value);
   if (wikidata) {
     if (wikidata.category === local.category && wikidata.confidence >= 0.90) {
       return {
@@ -295,6 +296,39 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
         reason: "category_mismatch",
         confidence: wikidata.confidence,
         sources: wikipedia ? [wikipedia.source, "wikidata-entity"] : ["wikidata-entity"],
+      };
+    }
+  }
+
+  // Gemini is the final external fallback after Wikipedia, Groq, and Wikidata.
+  const gemini = await validateWordWithGemini(local.value, local.category);
+  if (gemini) {
+    if (gemini.valid && gemini.category === local.category && gemini.confidence >= 0.80) {
+      return {
+        ...local,
+        decision: "accept",
+        reason: "known_word",
+        confidence: gemini.confidence,
+        sources: [
+          ...(wikipedia ? [wikipedia.source] : []),
+          ...(groq ? [groq.source] : []),
+          ...(wikidata ? [wikidata.source] : []),
+          gemini.source,
+        ],
+      };
+    }
+    if (gemini.category !== local.category && gemini.confidence >= 0.80) {
+      return {
+        ...local,
+        decision: "reject",
+        reason: "category_mismatch",
+        confidence: gemini.confidence,
+        sources: [
+          ...(wikipedia ? [wikipedia.source] : []),
+          ...(groq ? [groq.source] : []),
+          ...(wikidata ? [wikidata.source] : []),
+          gemini.source,
+        ],
       };
     }
   }
