@@ -224,72 +224,31 @@ async function queryWikipedia(word: string): Promise<ExternalEvidence | null> {
   return { category, confidence: 0.88, source: "wikipedia-exact", exact: true };
 }
 
-async function resolveExternal(value: string, requestedCategory: Category): Promise<ExternalDecision | null> {
-  // Wikipedia is the first external source after the local GAME index.
-  const wikipedia = await queryWikipedia(value);
+async function validateExternally(local: ValidationResult): Promise<ValidationResult & { sources?: string[] }> {
+  if (!local.normalized) return local;
+
+  // 1) Wikipedia: first external source, for every GAME category.
+  const wikipedia = await queryWikipedia(local.normalized);
   if (wikipedia) {
-    if (wikipedia.category === requestedCategory && wikipedia.confidence >= 0.80) {
+    if (wikipedia.category === local.category && wikipedia.confidence >= 0.80) {
       return {
-        category: requestedCategory,
-        confidence: wikipedia.confidence,
+        ...local,
+        decision: "accept",
         reason: "known_word",
+        confidence: wikipedia.confidence,
         sources: [wikipedia.source],
       };
     }
     return {
-      category: wikipedia.category,
-      confidence: wikipedia.confidence,
+      ...local,
+      decision: "reject",
       reason: "category_mismatch",
+      confidence: wikipedia.confidence,
       sources: [wikipedia.source],
     };
   }
 
-  // Wikidata is supplementary evidence, but only after Wikipedia failed to identify the word.
-  const wikidata = await queryWikidata(value);
-  if (wikidata) {
-    if (wikidata.category === requestedCategory && wikidata.confidence >= 0.90) {
-      return {
-        category: requestedCategory,
-        confidence: wikidata.confidence,
-        reason: "known_word",
-        sources: [wikidata.source],
-      };
-    }
-    return {
-      category: wikidata.category,
-      confidence: wikidata.confidence,
-      reason: "category_mismatch",
-      sources: [wikidata.source],
-    };
-  }
-
-  return null;
-}
-
-async function validateExternally(local: ValidationResult): Promise<ValidationResult & { sources?: string[] }> {
-  if (!local.normalized) return local;
-
-  const external = await resolveExternal(local.normalized, local.category);
-  if (external) {
-    if (external.reason === "category_mismatch") {
-      return {
-        ...local,
-        decision: "reject",
-        reason: "category_mismatch",
-        confidence: external.confidence,
-        sources: external.sources,
-      };
-    }
-    return {
-      ...local,
-      decision: "accept",
-      reason: external.reason,
-      confidence: external.confidence,
-      sources: external.sources,
-    };
-  }
-
-  // Final AI fallback for EVERY GAME category.
+  // 2) Groq: second external source, for every GAME category.
   const groq = await validateWordWithGroq(local.normalized, local.category);
   if (groq) {
     if (groq.valid && groq.category === local.category && groq.confidence >= 0.10) {
@@ -312,11 +271,40 @@ async function validateExternally(local: ValidationResult): Promise<ValidationRe
     }
   }
 
-  // Name-specific source remains a final human-only supplement after the generic pipeline.
+  // 3) Wikidata: tertiary fallback, after Wikipedia and Groq.
+  const wikidata = await queryWikidata(local.normalized);
+  if (wikidata) {
+    if (wikidata.category === local.category && wikidata.confidence >= 0.90) {
+      return {
+        ...local,
+        decision: "accept",
+        reason: "known_word",
+        confidence: wikidata.confidence,
+        sources: [wikidata.source],
+      };
+    }
+    if (wikidata.category !== local.category && wikidata.confidence >= 0.90) {
+      return {
+        ...local,
+        decision: "reject",
+        reason: "category_mismatch",
+        confidence: wikidata.confidence,
+        sources: [wikidata.source],
+      };
+    }
+  }
+
+  // 4) Human-name lexicon: final human-only supplement.
   if (local.category === "human") {
     const nameEvidence = await validateArabicGivenName(local.normalized);
     if (nameEvidence) {
-      return { ...local, decision: "accept", reason: "known_word", confidence: nameEvidence.confidence, sources: [nameEvidence.source] };
+      return {
+        ...local,
+        decision: "accept",
+        reason: "known_word",
+        confidence: nameEvidence.confidence,
+        sources: [nameEvidence.source],
+      };
     }
   }
 
