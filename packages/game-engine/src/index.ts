@@ -56,6 +56,17 @@ export interface GameRound {
   submissions: AnswerSet[];
 }
 
+export interface AnswerValidationOverride {
+  valid: boolean;
+  reason: AnswerReason;
+}
+
+export type AnswerValidator = (
+  category: Category,
+  answer: string | undefined,
+  letter: string,
+) => AnswerValidationOverride | null;
+
 export const ARABIC_LETTERS = [
   "ا", "ب", "ت", "ث", "ج", "ح", "خ", "د", "ذ", "ر", "ز",
   "س", "ش", "ص", "ض", "ط", "ظ", "ع", "غ", "ف", "ق", "ك",
@@ -65,18 +76,18 @@ export const ARABIC_LETTERS = [
 const ANSWER_BANK: Record<Category, readonly string[]> = {
   human: [
     "محمد", "مريم", "ماجد", "منى", "محمود", "مصطفى", "منصور", "مروان", "مهدي", "مراد",
-    "سارة", "سعيد", "سلمان", "سامي", "سميرة", "سلمان", "شيماء", "شيرين", "صالح", "صفاء",
+    "سارة", "سعيد", "سلمان", "سامي", "سميرة", "شيماء", "شيرين", "صالح", "صفاء",
     "علي", "عمر", "عائشة", "عادل", "عمار", "فهد", "فاطمة", "فارس", "كريم", "ليان",
     "ليلى", "مازن", "نورة", "نور", "هاني", "هند", "وليد", "ياسر", "يوسف", "ياسمين",
   ],
   animal: [
-    "ماعز", "مهر", "ماعز", "محمرة", "مها", "نمر", "نحلة", "نعامة", "نسر", "ناموسة",
+    "ماعز", "مهر", "مها", "نمر", "نحلة", "نعامة", "نسر", "ناموسة",
     "أسد", "أرنب", "بقرة", "بطة", "بطريق", "جمل", "جرو", "حمار", "حصان", "خروف",
     "دلفين", "ذئب", "راكون", "زرافة", "سمكة", "سنجاب", "صقر", "ضبع", "عقرب", "غزال",
-    "فيل", "قرد", "كلب", "لقلق", "موزة البحر", "هدهد", "وحيد القرن", "يمامة", "يربوع", "يعسوب",
+    "فيل", "قرد", "كلب", "لقلق", "هدهد", "وحيد القرن", "يمامة", "يربوع", "يعسوب",
   ],
   plant: [
-    "موز", "مانجو", "مشمش", "ملوخية", "مريمية", "مريمية", "نخلة", "نعناع", "نرجس", "نبات",
+    "موز", "مانجو", "مشمش", "ملوخية", "مريمية", "نخلة", "نعناع", "نرجس",
     "أرز", "أقحوان", "بقدونس", "بامية", "بنفسج", "تفاح", "تين", "جرجير", "جزر", "حبق",
     "خس", "خزامى", "رمان", "ريحان", "زعتر", "زيتون", "سدر", "سمسم", "صبار", "عنب",
     "فلفل", "قرنفل", "كزبرة", "ليمون", "ورد", "ياسمين", "يقطين", "بابونج", "بطاطا", "برسيم",
@@ -85,12 +96,12 @@ const ANSWER_BANK: Record<Category, readonly string[]> = {
     "مفتاح", "مكتب", "ملعقة", "مرآة", "مقص", "مصباح", "منضدة", "مروحة", "مغسلة", "مجلد",
     "باب", "بطانية", "بطارية", "تلفاز", "ثلاجة", "جهاز", "حقيبة", "خزانة", "دراجة", "ساعة",
     "سيارة", "صندوق", "طبق", "طاولة", "علبة", "غسالة", "فرشاة", "قلم", "كتاب", "كرسي",
-    "لوحة", "ممحاة", "نافذة", "هاتف", "ورقة", "يافطة", "ابريق", "اجراس", "اسفنجة", "مسمار",
+    "لوحة", "ممحاة", "نافذة", "هاتف", "ورقة", "يافطة", "إبريق", "أجراس", "إسفنجة", "مسمار",
   ],
   country: [
     "مصر", "ماليزيا", "مالطا", "مغرب", "موريتانيا", "مدغشقر", "موزمبيق", "مقدونيا", "منغوليا", "مكسيكا",
     "البحرين", "الإمارات", "الأردن", "ألمانيا", "إسبانيا", "إيطاليا", "أستراليا", "إندونيسيا", "البرازيل", "بلجيكا",
-    "تونس", "تركيا", "الجزائر", "السعودية", "السودان", "الصين", "العراق", "العراق", "عمان", "فرنسا",
+    "تونس", "تركيا", "الجزائر", "السعودية", "السودان", "الصين", "العراق", "عمان", "فرنسا",
     "فلسطين", "قطر", "كندا", "كرواتيا", "لبنان", "ليبيا", "نيبال", "نيجيريا", "هولندا", "اليابان",
   ],
 };
@@ -216,6 +227,7 @@ export function validateAnswer(
 export function finishRound(
   round: GameRound,
   now = Date.now(),
+  validator?: AnswerValidator,
 ): { round: GameRound; result: RoundResult } {
   if (round.state !== "playing") {
     throw new Error("Only playing rounds can be finished");
@@ -224,9 +236,18 @@ export function finishRound(
   const validated = new Map<string, ValidatedAnswer[]>();
 
   for (const submission of round.submissions) {
-    const answers = round.config.categories.map((category) =>
-      validateAnswer(category, submission.answers[category], round.config.letter),
-    );
+    const answers = round.config.categories.map((category) => {
+      const override = validator?.(category, submission.answers[category], round.config.letter);
+      if (override) {
+        return {
+          category,
+          value: submission.answers[category]?.trim() ?? "",
+          valid: override.valid,
+          reason: override.reason,
+        };
+      }
+      return validateAnswer(category, submission.answers[category], round.config.letter);
+    });
     validated.set(submission.playerId, answers);
   }
 
