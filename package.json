@@ -9,6 +9,7 @@
   "scripts": {
     "mobile": "npm --workspace @game/mobile start",
     "web": "npm --workspace @game/mobile run web",
-    "server": "npm --workspace @game/server run dev"
+    "server": "npm --workspace @game/server run dev",
+    "validation:awn": "python scripts/download-awn.py"
   }
 }
