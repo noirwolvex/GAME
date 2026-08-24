@@ -11,11 +11,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "data" / "wikidata" / "game.json"
-ENDPOINT = "https://query.wikidata.org/sparql"
+ENDPOINT = "https://query-main.wikidata.org/sparql"
 USER_AGENT = "GAME-validation/0.1 (local development)"
 
-# Use direct instance-of matches for the first pass. Property-path queries
-# (P31/P279*) are substantially more expensive on the public WDQS service.
 CATEGORIES = {
     "human": ["Q5"],
     "animal": ["Q729"],
@@ -35,6 +33,8 @@ def normalize(value: str) -> str:
 
 def build_query(types: list[str], limit: int, offset: int) -> str:
     values = " ".join(f"wd:{q}" for q in types)
+    # Keep the query deliberately small: no property paths, aliases, or labels
+    # joins beyond the Arabic label itself. The public WDQS is currently slow.
     return f"""
 SELECT ?item ?itemLabel WHERE {{
   ?item wdt:P31 ?type .
@@ -48,7 +48,7 @@ OFFSET {offset}
 """.strip()
 
 
-def query_wikidata(query: str, retries: int = 4) -> list[dict[str, str]]:
+def query_wikidata(query: str, retries: int = 5) -> list[dict[str, str]]:
     encoded = urllib.parse.urlencode({"query": query, "format": "json"}).encode()
 
     for attempt in range(retries):
@@ -63,7 +63,7 @@ def query_wikidata(query: str, retries: int = 4) -> list[dict[str, str]]:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=90) as response:
+            with urllib.request.urlopen(request, timeout=120) as response:
                 payload = json.load(response)
             return [
                 {
@@ -75,7 +75,7 @@ def query_wikidata(query: str, retries: int = 4) -> list[dict[str, str]]:
         except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as error:
             if attempt == retries - 1:
                 raise
-            delay = 3.0 * (2**attempt)
+            delay = 4.0 * (2**attempt)
             print(f"  request failed ({error}); retrying in {delay:.0f}s...")
             time.sleep(delay)
 
@@ -84,9 +84,9 @@ def query_wikidata(query: str, retries: int = 4) -> list[dict[str, str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Import a bounded Arabic GAME subset from Wikidata")
-    parser.add_argument("--limit", type=int, default=500)
-    parser.add_argument("--pages", type=int, default=10)
-    parser.add_argument("--sleep", type=float, default=2.0)
+    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--pages", type=int, default=5)
+    parser.add_argument("--sleep", type=float, default=3.0)
     args = parser.parse_args()
 
     if args.limit <= 0 or args.pages <= 0:
@@ -125,7 +125,7 @@ def main() -> int:
             print(f"  rows: {len(rows):,}; unique words: {len(data):,}")
             time.sleep(max(0.0, args.sleep))
 
-    serializable = {}
+    serializable: dict[str, dict[str, object]] = {}
     for word, entry in data.items():
         categories = sorted(entry["categories"])
         if len(categories) != 1:
