@@ -4,24 +4,33 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "data" / "validation" / "master-index.json"
+BASE_SOURCE = ROOT / "data" / "validation" / "master-index.json"
+REVIEW_SOURCE = ROOT / "data" / "validation" / "review-master-index.json"
+ELNER_SOURCE = ROOT / "data" / "validation" / "elner-master-index.json"
 OUTPUT = ROOT / "packages" / "validation" / "src" / "game-index.generated.ts"
+CATEGORIES = {"human", "animal", "plant", "object", "country"}
+
+
+def choose_source() -> Path:
+    # Prefer the most complete merged layer that exists locally.
+    for candidate in (REVIEW_SOURCE, ELNER_SOURCE, BASE_SOURCE):
+        if candidate.exists():
+            return candidate
+    raise SystemExit(
+        f"Missing validation index. Run: npm run validation:merge"
+    )
 
 
 def main() -> int:
-    if not SOURCE.exists():
-        raise SystemExit(
-            f"Missing {SOURCE}. Run: npm run validation:merge"
-        )
-
-    payload = json.loads(SOURCE.read_text(encoding="utf-8"))
+    source = choose_source()
+    payload = json.loads(source.read_text(encoding="utf-8"))
     entries = payload.get("entries", {})
 
     generated = []
     for word, item in entries.items():
         category = item.get("category")
         confidence = item.get("confidence", 0)
-        if category not in {"human", "animal", "plant", "object", "country"}:
+        if category not in CATEGORIES:
             continue
         generated.append({
             "word": word,
@@ -40,7 +49,7 @@ def main() -> int:
         "  confidence: number;",
         "}",
         "",
-        "// Generated from data/validation/master-index.json.",
+        f"// Generated from {source.relative_to(ROOT).as_posix()}.",
         "// Do not edit by hand. Regenerate with: npm run validation:build-index",
         "export const GAME_INDEX_ENTRIES: readonly GeneratedEntry[] = [",
     ]
@@ -60,7 +69,8 @@ def main() -> int:
     ])
 
     OUTPUT.write_text("\n".join(lines), encoding="utf-8")
-    print(f"Generated {len(generated):,} GAME validation entries from master-index")
+    print(f"Generated {len(generated):,} GAME validation entries")
+    print(f"Source: {source.relative_to(ROOT)}")
     print(f"Done: {OUTPUT}")
     return 0
 
