@@ -94,10 +94,9 @@ export async function validateArabicGivenName(word: string): Promise<NameValidat
   const normalized = normalizeArabic(word);
   if (!normalized) return null;
 
-  // Groq is the first fallback for unknown human names so common names do not
-  // depend on a dictionary/Wiktionary page existing.
+  // User-requested low AI threshold for the human-name path only.
   const groq = await validateArabicHumanNameWithGroq(word);
-  if (groq?.valid && groq.confidence >= 0.75) {
+  if (groq?.valid && groq.confidence >= 0.10) {
     return {
       category: "human",
       confidence: groq.confidence,
