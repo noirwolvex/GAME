@@ -26,6 +26,7 @@
     "validation:camelfreq:profile": "python scripts/profile-camel-candidates.py",
     "validation:camelfreq:classify": "python scripts/classify-camel-candidates.py",
     "validation:camelfreq:morphology": "python scripts/analyze-camel-morphology.py",
+    "validation:camelfreq:merge": "python scripts/merge-camel-morphology.py",
     "validation:elner": "python scripts/import-elner-candidates.py",
     "validation:merge-elner": "python scripts/merge-elner-candidates.py"
   }
